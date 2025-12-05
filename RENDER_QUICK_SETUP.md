@@ -54,7 +54,7 @@ Go to **Environment** tab and add:
 - `POSTGRES_PORT` - Usually `5432`
 
 #### Optional
-- `REDIS_URL` - If you have a Redis service (format: `redis://host:port/0`)
+- `REDIS_URL` - **Leave unset** if you don't have Redis (app works without it). Only set if you have a Redis service (format: `redis://host:port/0`)
 - `OPENAI_API_KEY` - If using AI features
 
 ## 🧪 Testing Your Deployment

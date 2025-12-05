@@ -45,10 +45,13 @@ The following environment variables **must** be set in your Render dashboard for
 
 ### Optional (Recommended)
 
-8. **REDIS_URL**
+8. **REDIS_URL** (Optional)
    - **Description**: Redis connection URL for caching and sessions
-   - **Default**: `redis://redis:6379/0`
-   - **For Render**: Use Render's Redis service URL if available
+   - **Default**: `None` (Redis is optional)
+   - **For Render**: 
+     - Leave unset if you don't have Redis (app will work without it)
+     - Or use Render's Redis service URL if available (format: `redis://host:port/0`)
+   - **Note**: If not set, rate limiting and refresh token rotation will be disabled (app still works)
 
 9. **OPENAI_API_KEY**
    - **Description**: OpenAI API key for AI features

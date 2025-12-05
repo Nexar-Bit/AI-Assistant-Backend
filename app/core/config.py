@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     # pgvector
     PGVECTOR_ENABLED: bool = True
 
-    # Redis
-    REDIS_URL: str = "redis://redis:6379/0"
+    # Redis (Optional - set to empty string or "none" to disable)
+    REDIS_URL: str | None = None
 
     # PDF
     PDF_OUTPUT_DIR: str = "pdf_output"
