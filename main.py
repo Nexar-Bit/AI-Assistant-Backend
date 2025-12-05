@@ -25,12 +25,15 @@ def create_app() -> FastAPI:
         "http://127.0.0.1:3000",
     ]
     
+    # Always add the Vercel production URL
+    allowed_origins.append("https://ai-assist-eight.vercel.app")
+    
     # Add production frontend URL if provided
     frontend_url = os.getenv("FRONTEND_URL")
     if frontend_url:
         allowed_origins.append(frontend_url)
     
-    # Add Vercel frontend URL
+    # Add Vercel frontend URL (for preview deployments)
     vercel_url = os.getenv("VERCEL_URL")
     if vercel_url:
         # Vercel provides URL without protocol, add https
@@ -47,8 +50,11 @@ def create_app() -> FastAPI:
         # Allow multiple origins separated by comma
         allowed_origins.extend([origin.strip() for origin in cors_origins.split(",")])
     
-    # Always add the Vercel production URL
-    allowed_origins.append("https://ai-assist-eight.vercel.app")
+    # Log allowed origins in development for debugging
+    if settings.ENVIRONMENT == "development":
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"CORS allowed origins: {allowed_origins}")
     
     app.add_middleware(
         CORSMiddleware,
@@ -56,6 +62,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
 
     # Middleware
