@@ -1,0 +1,8 @@
+Alembic migrations for the Vehicle Diagnostics AI backend.
+
+Commands (from backend directory):
+
+  alembic revision -m "message" --autogenerate
+  alembic upgrade head
+
+
