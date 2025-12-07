@@ -221,61 +221,93 @@ def download_report_for_chat_thread(
     current_user: User = Depends(get_current_user),
 ):
     """Download PDF for a chat thread."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         thread_uuid = uuid.UUID(thread_id)
-    except ValueError:
+    except ValueError as e:
+        logger.error(f"Invalid thread_id format: {thread_id}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid thread_id",
         )
     
-    # Get thread using ChatSessionManager to ensure user has access
-    thread = ChatSessionManager.get_session(db, thread_uuid, current_user.id)
-    if not thread:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thread not found",
+    try:
+        # Get thread using ChatSessionManager to ensure user has access
+        thread = ChatSessionManager.get_session(db, thread_uuid, current_user.id)
+        if not thread:
+            logger.warning(f"Thread not found: {thread_id} for user {current_user.id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Thread not found",
+            )
+        
+        # Get all messages
+        messages = MessageHandler.get_thread_messages(db, thread_uuid)
+        logger.info(f"Retrieved {len(messages)} messages for thread {thread_id}")
+        
+        # Get vehicle if available
+        vehicle = None
+        if thread.vehicle_id:
+            vehicle = db.query(Vehicle).filter(Vehicle.id == thread.vehicle_id).first()
+        
+        # Generate PDF
+        try:
+            pdf = generate_chat_thread_pdf(
+                db,
+                thread=thread,
+                messages=messages,
+                user=current_user,
+                vehicle=vehicle,
+            )
+            logger.info(f"PDF generated successfully: {pdf.file_path}")
+        except Exception as e:
+            logger.error(f"Error generating PDF for thread {thread_id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to generate PDF: {str(e)}",
+            )
+        
+        # Increment download count
+        pdf.download_count += 1
+        db.add(pdf)
+        db.commit()
+        
+        # Log download event
+        log_auth_event(
+            db,
+            user_id=str(current_user.id),
+            action_type="REPORT_DOWNLOAD",
+            success=True,
+            ip_address=None,
+            user_agent=None,
+            details={"thread_id": thread_id, "type": "chat_thread"},
         )
-    
-    # Get all messages
-    messages = MessageHandler.get_thread_messages(db, thread_uuid)
-    
-    # Get vehicle if available
-    vehicle = None
-    if thread.vehicle_id:
-        vehicle = db.query(Vehicle).filter(Vehicle.id == thread.vehicle_id).first()
-    
-    # Generate PDF
-    pdf = generate_chat_thread_pdf(
-        db,
-        thread=thread,
-        messages=messages,
-        user=current_user,
-        vehicle=vehicle,
-    )
-    
-    # Increment download count
-    pdf.download_count += 1
-    db.add(pdf)
-    db.commit()
-    
-    # Log download event
-    log_auth_event(
-        db,
-        user_id=str(current_user.id),
-        action_type="REPORT_DOWNLOAD",
-        success=True,
-        ip_address=None,
-        user_agent=None,
-        details={"thread_id": thread_id, "type": "chat_thread"},
-    )
-    
-    # Generate filename
-    date_str = thread.created_at.strftime("%Y%m%d") if thread.created_at else ""
-    filename = f"diagnostic-report-{thread.license_plate}-{date_str}.pdf"
-    
-    return FileResponse(
-        path=pdf.file_path,
-        filename=filename,
-        media_type="application/pdf",
-    )
+        
+        # Generate filename
+        date_str = thread.created_at.strftime("%Y%m%d") if thread.created_at else ""
+        filename = f"diagnostic-report-{thread.license_plate}-{date_str}.pdf"
+        
+        # Verify file exists before returning
+        import os
+        if not os.path.exists(pdf.file_path):
+            logger.error(f"PDF file not found at path: {pdf.file_path}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="PDF file not found",
+            )
+        
+        return FileResponse(
+            path=pdf.file_path,
+            filename=filename,
+            media_type="application/pdf",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error downloading PDF for thread {thread_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}",
+        )

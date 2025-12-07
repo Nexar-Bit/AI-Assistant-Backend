@@ -511,53 +511,75 @@ def generate_chat_thread_pdf(
     force_regenerate: bool = False,
 ) -> ChatThreadPDF:
     """Generate (or reuse) a PDF for a chat thread."""
+    import logging
+    import uuid as uuid_lib
+    logger = logging.getLogger(__name__)
+    
     if HTML is None or CSS is None:
         raise RuntimeError(
             "PDF generation is not available in this environment. "
             "Please install 'weasyprint' (and its system dependencies) to enable PDF reports."
         )
-    
-    import uuid as uuid_lib
 
-    existing: ChatThreadPDF | None = (
-        db.query(ChatThreadPDF)
-        .filter(ChatThreadPDF.thread_id == thread.id)
-        .first()
-    )
-
-    if existing and not force_regenerate and os.path.exists(existing.file_path):
-        return existing
-
-    out_dir = _ensure_output_dir()
-    filename = f"chat-thread-{thread.id}.pdf"
-    file_path = out_dir / filename
-
-    html = _build_chat_thread_html(thread, messages, user, vehicle)
-
-    HTML(string=html).write_pdf(
-        target=str(file_path),
-        stylesheets=[CSS(string="@page { size: A4; margin: 16mm; }")],
-    )
-
-    size = file_path.stat().st_size
-
-    if existing:
-        existing.file_path = str(file_path)
-        existing.file_size_bytes = size
-        pdf_record = existing
-    else:
-        pdf_record = ChatThreadPDF(
-            id=uuid_lib.uuid4(),
-            thread_id=thread.id,
-            workshop_id=thread.workshop_id,
-            file_path=str(file_path),
-            file_size_bytes=size,
+    try:
+        existing: ChatThreadPDF | None = (
+            db.query(ChatThreadPDF)
+            .filter(ChatThreadPDF.thread_id == thread.id)
+            .first()
         )
-        db.add(pdf_record)
 
-    db.commit()
-    db.refresh(pdf_record)
-    return pdf_record
+        if existing and not force_regenerate and os.path.exists(existing.file_path):
+            logger.info(f"Reusing existing PDF for thread {thread.id}")
+            return existing
+
+        logger.info(f"Generating new PDF for thread {thread.id}")
+        out_dir = _ensure_output_dir()
+        logger.info(f"PDF output directory: {out_dir}")
+        
+        filename = f"chat-thread-{thread.id}.pdf"
+        file_path = out_dir / filename
+
+        html = _build_chat_thread_html(thread, messages, user, vehicle)
+        logger.debug(f"HTML generated, length: {len(html)}")
+
+        try:
+            HTML(string=html).write_pdf(
+                target=str(file_path),
+                stylesheets=[CSS(string="@page { size: A4; margin: 16mm; }")],
+            )
+            logger.info(f"PDF written to: {file_path}")
+        except Exception as e:
+            logger.error(f"Error writing PDF file: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to write PDF file: {str(e)}")
+
+        if not os.path.exists(file_path):
+            raise RuntimeError(f"PDF file was not created at {file_path}")
+
+        size = file_path.stat().st_size
+        logger.info(f"PDF file size: {size} bytes")
+
+        if existing:
+            existing.file_path = str(file_path)
+            existing.file_size_bytes = size
+            pdf_record = existing
+        else:
+            pdf_record = ChatThreadPDF(
+                id=uuid_lib.uuid4(),
+                thread_id=thread.id,
+                workshop_id=thread.workshop_id,
+                file_path=str(file_path),
+                file_size_bytes=size,
+            )
+            db.add(pdf_record)
+
+        db.commit()
+        db.refresh(pdf_record)
+        logger.info(f"PDF record created/updated: {pdf_record.id}")
+        return pdf_record
+    except Exception as e:
+        logger.error(f"Error in generate_chat_thread_pdf: {e}", exc_info=True)
+        db.rollback()
+        raise
 
 
 
