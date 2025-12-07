@@ -223,6 +223,44 @@ def get_workshop_members(
     return {"members": members_with_user}
 
 
+@router.get("/{workshop_id}/my-role")
+def get_my_workshop_role(
+    workshop_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get current user's role in a workshop (any member can access this)."""
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop ID",
+        )
+    
+    # Get user's membership - any member can see their own role
+    membership = WorkshopMemberCRUD.get_membership(db, workshop_uuid, current_user.id)
+    
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a member of this workshop",
+        )
+    
+    if not membership.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your membership in this workshop is inactive",
+        )
+    
+    return {
+        "workshop_id": str(workshop_uuid),
+        "user_id": str(current_user.id),
+        "role": membership.role,
+        "is_active": membership.is_active,
+    }
+
+
 @router.put("/{workshop_id}/members/{user_id}/role")
 def update_member_role(
     workshop_id: str,
