@@ -281,19 +281,35 @@ def delete_thread(
             detail="Thread not found",
         )
     
-    # Delete all messages associated with the thread
-    messages = db.query(ChatMessage).filter(ChatMessage.thread_id == thread_uuid).all()
-    for message in messages:
-        db.delete(message)
-    
-    # Delete the thread
-    db.delete(thread)
-    db.commit()
-    
-    # Disconnect any WebSocket connections for this thread
-    connection_manager.disconnect_thread(str(thread_uuid))
-    
-    return None
+    try:
+        # Delete all messages associated with the thread
+        messages = db.query(ChatMessage).filter(ChatMessage.thread_id == thread_uuid).all()
+        for message in messages:
+            db.delete(message)
+        
+        # Delete the thread
+        db.delete(thread)
+        db.commit()
+        
+        # Disconnect any WebSocket connections for this thread
+        try:
+            connection_manager.disconnect_thread_clients(str(thread_uuid))
+        except Exception as ws_error:
+            # Log but don't fail if WebSocket cleanup fails
+            import logging
+            logger = logging.getLogger("app.api.v1.chat")
+            logger.warning("Failed to disconnect WebSocket connections for thread %s: %s", thread_uuid, ws_error)
+        
+        return None
+    except Exception as e:
+        db.rollback()
+        import logging
+        logger = logging.getLogger("app.api.v1.chat")
+        logger.error("Failed to delete thread %s: %s", thread_uuid, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete thread",
+        )
 
 
 @router.post("/threads/{thread_id}/messages", status_code=status.HTTP_201_CREATED)

@@ -80,6 +80,17 @@ class ChatWebSocketManager:
         
         return sent_count
 
+    def disconnect_thread_clients(self, thread_id: str):
+        """
+        Disconnects all WebSocket connections for a specific thread.
+        This is called when a thread is deleted.
+        Note: This is a synchronous method that removes the thread from tracking.
+        The actual WebSocket disconnection will happen when clients try to send messages.
+        """
+        if thread_id in self.active_connections:
+            del self.active_connections[thread_id]
+            logger.info("Removed all WebSocket connections for thread: %s", thread_id)
+
 
 # Global WebSocket manager instance
 connection_manager = ChatWebSocketManager()
