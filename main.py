@@ -32,7 +32,7 @@ def create_app() -> FastAPI:
     ]
     
     # Always add the Vercel production URL
-    allowed_origins.append("https://ai-assist-eight.vercel.app")
+    allowed_origins.append("https://ai-assistant-ivory-sigma.vercel.app")
     
     # Add production frontend URL if provided
     frontend_url = os.getenv("FRONTEND_URL")

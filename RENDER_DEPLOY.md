@@ -23,7 +23,8 @@ The following environment variables **must** be set in your Render dashboard for
 3. **POSTGRES_HOST**
    - **Description**: PostgreSQL database host
    - **For Render**: Usually provided by Render's PostgreSQL service
-   - **Example**: `dpg-xxxxx-a.oregon-postgres.render.com`
+   - **Example**: `dpg-d4qpiqggjchc73bgl4ng-a.virginia-postgres.render.com`
+   - **Note**: Use the external hostname (with `.virginia-postgres.render.com`)
 
 4. **POSTGRES_PORT**
    - **Description**: PostgreSQL port
@@ -41,7 +42,7 @@ The following environment variables **must** be set in your Render dashboard for
 7. **POSTGRES_DB**
    - **Description**: PostgreSQL database name
    - **For Render**: Usually provided by Render's PostgreSQL service
-   - **Example**: `vehicle_ai_db`
+   - **Example**: `ai_assist_o7jb`
 
 ### Optional (Recommended)
 
