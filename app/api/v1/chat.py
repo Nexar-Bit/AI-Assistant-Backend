@@ -257,6 +257,45 @@ def update_thread(
     return thread
 
 
+@router.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_thread(
+    thread_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a chat thread and all its messages."""
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid thread_id",
+        )
+    
+    # Get thread using ChatSessionManager to ensure user has access
+    thread = ChatSessionManager.get_session(db, thread_uuid, current_user.id)
+    
+    if not thread:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thread not found",
+        )
+    
+    # Delete all messages associated with the thread
+    messages = db.query(ChatMessage).filter(ChatMessage.thread_id == thread_uuid).all()
+    for message in messages:
+        db.delete(message)
+    
+    # Delete the thread
+    db.delete(thread)
+    db.commit()
+    
+    # Disconnect any WebSocket connections for this thread
+    connection_manager.disconnect_thread(str(thread_uuid))
+    
+    return None
+
+
 @router.post("/threads/{thread_id}/messages", status_code=status.HTTP_201_CREATED)
 async def send_message(
     thread_id: str,
