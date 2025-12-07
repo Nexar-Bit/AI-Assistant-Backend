@@ -1,5 +1,11 @@
 # Render Deployment Guide
 
+## Python Version
+
+This project requires **Python 3.12** (specified in `runtime.txt`). Render will automatically use this version when deploying.
+
+**⚠️ Important**: Python 3.13 is not compatible with `weasyprint` (used for PDF generation). The `runtime.txt` file ensures Python 3.12 is used.
+
 ## Required Environment Variables
 
 The following environment variables **must** be set in your Render dashboard for the backend to deploy successfully:

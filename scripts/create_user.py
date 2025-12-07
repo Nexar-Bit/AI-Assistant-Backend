@@ -38,7 +38,7 @@ def create_user(
             print(f"❌ Password validation failed: {e}")
             sys.exit(1)
 
-        # Create user
+        # Create user (with email verified for script-created users)
         user = User(
             id=uuid.uuid4(),
             username=username,
@@ -46,6 +46,7 @@ def create_user(
             password_hash=password_hash,
             role=role,
             is_active=is_active,
+            email_verified=True,  # Script-created users are pre-verified
         )
 
         db.add(user)
