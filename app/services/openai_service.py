@@ -71,10 +71,22 @@ class OpenAIProvider(AIProvider):
     def __init__(self, api_key: str, default_model: str = "gpt-4o-mini") -> None:
         if AsyncOpenAI is None:
             raise RuntimeError(
-                "OpenAI client is not available. Please install 'openai>=1.0.0' "
-                "in this Python environment to use AI features."
+                "OpenAI client is not available. Please install 'openai>=1.55.3' "
+                "in this Python environment to use AI features. "
+                "This version is required for compatibility with httpx 0.28.x."
             )
-        self.client = AsyncOpenAI(api_key=api_key)
+        try:
+            self.client = AsyncOpenAI(api_key=api_key)
+        except (TypeError, AttributeError) as e:
+            logger.error(
+                f"OpenAI client initialization failed: {e}. "
+                "This is likely a version compatibility issue. "
+                "Please ensure openai>=1.55.3 is installed."
+            )
+            raise RuntimeError(
+                "Failed to initialize OpenAI client. "
+                "Please upgrade to openai>=1.55.3 for compatibility with httpx 0.28.x."
+            ) from e
         self.default_model = default_model
 
     def _get_encoding(self, model: str):
