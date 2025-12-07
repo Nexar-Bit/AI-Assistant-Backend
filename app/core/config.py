@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str | None = None
     UPLOAD_DIR: str = "uploads"
+    
+    # Email (for registration and notifications)
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM_EMAIL: str | None = None
+    SMTP_FROM_NAME: str = "Vehicle Diagnostics AI"
+    FRONTEND_URL: str = "http://localhost:5173"
 
     @field_validator("ENVIRONMENT")
     @classmethod

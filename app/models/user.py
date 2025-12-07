@@ -15,6 +15,9 @@ class User(TimestampedUUIDModel):
     )
     daily_token_limit: Mapped[int] = mapped_column(Integer, default=10000)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email_verification_expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

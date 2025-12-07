@@ -6,14 +6,20 @@ from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+import uuid
+
 from app.api.dependencies import get_current_user
 from app.core.database import get_db
 from app.models.consultation import Consultation
 from app.models.consultation_pdf import ConsultationPDF
+from app.models.chat_thread_pdf import ChatThreadPDF
 from app.models.user import User
 from app.models.vehicle import Vehicle
+from app.chat.models import ChatThread, ChatMessage
+from app.chat.messages import MessageHandler
+from app.chat.sessions import ChatSessionManager
 from app.services.audit_service import log_auth_event
-from app.services.pdf_service import generate_consultation_pdf
+from app.services.pdf_service import generate_consultation_pdf, generate_chat_thread_pdf
 
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -164,3 +170,112 @@ def report_stats(
         {"day": str(r.day), "reports": int(r.reports), "downloads": int(r.downloads)}
         for r in rows
     ]
+
+
+@router.post("/chat-threads/{thread_id}", status_code=status.HTTP_201_CREATED)
+def generate_report_for_chat_thread(
+    thread_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate PDF for a chat thread."""
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid thread_id",
+        )
+    
+    # Get thread using ChatSessionManager to ensure user has access
+    thread = ChatSessionManager.get_session(db, thread_uuid, current_user.id)
+    if not thread:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thread not found",
+        )
+    
+    # Get all messages
+    messages = MessageHandler.get_thread_messages(db, thread_uuid)
+    
+    # Get vehicle if available
+    vehicle = None
+    if thread.vehicle_id:
+        vehicle = db.query(Vehicle).filter(Vehicle.id == thread.vehicle_id).first()
+    
+    # Generate PDF
+    pdf = generate_chat_thread_pdf(
+        db,
+        thread=thread,
+        messages=messages,
+        user=current_user,
+        vehicle=vehicle,
+    )
+    return pdf
+
+
+@router.get("/chat-threads/{thread_id}/download")
+def download_report_for_chat_thread(
+    thread_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Download PDF for a chat thread."""
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid thread_id",
+        )
+    
+    # Get thread using ChatSessionManager to ensure user has access
+    thread = ChatSessionManager.get_session(db, thread_uuid, current_user.id)
+    if not thread:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thread not found",
+        )
+    
+    # Get all messages
+    messages = MessageHandler.get_thread_messages(db, thread_uuid)
+    
+    # Get vehicle if available
+    vehicle = None
+    if thread.vehicle_id:
+        vehicle = db.query(Vehicle).filter(Vehicle.id == thread.vehicle_id).first()
+    
+    # Generate PDF
+    pdf = generate_chat_thread_pdf(
+        db,
+        thread=thread,
+        messages=messages,
+        user=current_user,
+        vehicle=vehicle,
+    )
+    
+    # Increment download count
+    pdf.download_count += 1
+    db.add(pdf)
+    db.commit()
+    
+    # Log download event
+    log_auth_event(
+        db,
+        user_id=str(current_user.id),
+        action_type="REPORT_DOWNLOAD",
+        success=True,
+        ip_address=None,
+        user_agent=None,
+        details={"thread_id": thread_id, "type": "chat_thread"},
+    )
+    
+    # Generate filename
+    date_str = thread.created_at.strftime("%Y%m%d") if thread.created_at else ""
+    filename = f"diagnostic-report-{thread.license_plate}-{date_str}.pdf"
+    
+    return FileResponse(
+        path=pdf.file_path,
+        filename=filename,
+        media_type="application/pdf",
+    )
