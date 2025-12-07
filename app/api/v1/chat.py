@@ -215,6 +215,48 @@ def get_thread(
     }
 
 
+@router.put("/threads/{thread_id}")
+def update_thread(
+    thread_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update a chat thread (e.g., mark as resolved, archive, etc.)."""
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid thread_id",
+        )
+    
+    # Get thread using ChatSessionManager
+    thread = ChatSessionManager.get_session(db, thread_uuid, current_user.id)
+    
+    if not thread:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thread not found",
+        )
+    
+    # Update fields if provided
+    if "is_resolved" in payload:
+        thread.is_resolved = bool(payload["is_resolved"])
+    if "is_archived" in payload:
+        thread.is_archived = bool(payload["is_archived"])
+    if "status" in payload:
+        thread.status = payload["status"]
+    if "title" in payload:
+        thread.title = payload["title"]
+    
+    db.add(thread)
+    db.commit()
+    db.refresh(thread)
+    
+    return thread
+
+
 @router.post("/threads/{thread_id}/messages", status_code=status.HTTP_201_CREATED)
 async def send_message(
     thread_id: str,
@@ -390,5 +432,96 @@ async def send_message(
     return {
         "user_message": user_message,
         "assistant_message": assistant_message,
+    }
+
+
+@router.get("/stats")
+def get_dashboard_stats(
+    workshop_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get dashboard statistics for the current user/workshop."""
+    from sqlalchemy import func, and_
+    from datetime import datetime, timedelta
+    
+    try:
+        workshop_uuid = uuid.UUID(workshop_id) if workshop_id else None
+    except (ValueError, TypeError):
+        # If workshop_id is provided but invalid, return error. If None, continue.
+        if workshop_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid workshop_id",
+            )
+        workshop_uuid = None
+    
+    if workshop_uuid:
+        # Ensure user is member of workshop
+        workshops._ensure_workshop_member(db, current_user.id, workshop_uuid)
+    
+    # Get threads for the user/workshop
+    query = db.query(ChatThread).filter(ChatThread.user_id == current_user.id)
+    if workshop_uuid:
+        query = query.filter(ChatThread.workshop_id == workshop_uuid)
+    
+    # Total consultations
+    total_consultations = query.count()
+    
+    # Resolved count
+    resolved_count = query.filter(ChatThread.is_resolved == True).count()
+    
+    # Pending count (active and not resolved)
+    pending_count = query.filter(
+        and_(ChatThread.is_resolved == False, ChatThread.is_archived == False)
+    ).count()
+    
+    # Tokens used this month
+    start_of_month = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    tokens_this_month = (
+        db.query(func.sum(ChatThread.total_tokens))
+        .filter(
+            ChatThread.user_id == current_user.id,
+            ChatThread.created_at >= start_of_month,
+        )
+        .scalar() or 0
+    )
+    
+    if workshop_uuid:
+        tokens_this_month = (
+            db.query(func.sum(ChatThread.total_tokens))
+            .filter(
+                ChatThread.workshop_id == workshop_uuid,
+                ChatThread.created_at >= start_of_month,
+            )
+            .scalar() or 0
+        )
+    
+    # Recent activity (last 5 threads)
+    recent_threads = (
+        query.order_by(desc(ChatThread.created_at))
+        .limit(5)
+        .all()
+    )
+    
+    recent_activity = [
+        {
+            "id": str(t.id),
+            "license_plate": t.license_plate,
+            "title": t.title or f"Consultation for {t.license_plate}",
+            "status": t.status,
+            "is_resolved": t.is_resolved,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "last_message_at": t.last_message_at.isoformat() if t.last_message_at else None,
+        }
+        for t in recent_threads
+    ]
+    
+    return {
+        "total_consultations": total_consultations,
+        "tokens_used_this_month": int(tokens_this_month),
+        "resolved_count": resolved_count,
+        "pending_count": pending_count,
+        "recent_activity": recent_activity,
     }
 

@@ -309,10 +309,35 @@ async def chat_websocket(
         logger.info("WebSocket disconnected: thread_id=%s, user_id=%s", thread_id, user.id)
     except Exception as e:
         logger.error("WebSocket error: %s", e, exc_info=True)
+        error_message = "Internal server error"
+        
+        # Provide more specific error messages based on exception type
+        error_type = type(e).__name__
+        error_str = str(e)
+        
+        if "OPENAI_API_KEY" in error_str or "api key" in error_str.lower():
+            error_message = "AI service configuration error. Please contact your administrator."
+        elif "token" in error_str.lower() and ("limit" in error_str.lower() or "exceeded" in error_str.lower()):
+            error_message = "Token limit exceeded. Please try again later or contact your administrator."
+        elif "database" in error_str.lower() or "connection" in error_str.lower() or "sql" in error_str.lower():
+            error_message = "Database connection error. Please try again."
+        elif "not found" in error_str.lower() or "404" in error_str:
+            error_message = "Resource not found. Please refresh and try again."
+        elif "permission" in error_str.lower() or "forbidden" in error_str.lower() or "403" in error_str:
+            error_message = "You don't have permission to perform this action."
+        elif "timeout" in error_str.lower():
+            error_message = "Request timed out. Please try again."
+        else:
+            # For debugging, include error type in development
+            import os
+            if os.getenv("ENVIRONMENT", "production") == "development":
+                error_message = f"Error: {error_type}: {error_str[:100]}"
+        
         try:
             await websocket.send_json({
                 "type": "error",
-                "message": "Internal server error",
+                "message": error_message,
+                "error_type": error_type,
             })
         except:
             pass

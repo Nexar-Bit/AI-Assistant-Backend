@@ -200,7 +200,197 @@ def get_workshop_members(
     _ensure_workshop_member(db, current_user.id, workshop_uuid)
     
     members = WorkshopMemberCRUD.get_workshop_members(db, workshop_uuid, active_only=False)
-    return {"members": members}
+    
+    # Include user information for each member
+    members_with_user = []
+    for member in members:
+        user = db.query(User).filter(User.id == member.user_id).first()
+        members_with_user.append({
+            "id": str(member.id),
+            "workshop_id": str(member.workshop_id),
+            "user_id": str(member.user_id),
+            "role": member.role,
+            "is_active": member.is_active,
+            "invited_by": str(member.invited_by) if member.invited_by else None,
+            "created_at": member.created_at.isoformat() if member.created_at else None,
+            "user": {
+                "id": str(user.id) if user else None,
+                "username": user.username if user else None,
+                "email": user.email if user else None,
+            } if user else None,
+        })
+    
+    return {"members": members_with_user}
+
+
+@router.put("/{workshop_id}/members/{user_id}/role")
+def update_member_role(
+    workshop_id: str,
+    user_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update a member's role (requires admin or owner role)."""
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop ID or user ID",
+        )
+    
+    _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
+    
+    new_role = payload.get("role")
+    if not new_role or new_role not in ["owner", "admin", "technician", "member", "viewer"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid role. Must be: owner, admin, technician, member, or viewer",
+        )
+    
+    # Prevent changing owner role
+    membership = WorkshopMemberCRUD.get_membership(db, workshop_uuid, user_uuid)
+    if membership and membership.role == "owner" and new_role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change owner role",
+        )
+    
+    updated = WorkshopMemberCRUD.update_role(db, workshop_uuid, user_uuid, new_role, current_user.id)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found",
+        )
+    
+    return updated
+
+
+@router.post("/{workshop_id}/members")
+def add_member(
+    workshop_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Add a user to a workshop (requires admin or owner role)."""
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop ID",
+        )
+    
+    _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
+    
+    user_email = payload.get("email") or payload.get("user_email")
+    user_id_str = payload.get("user_id")
+    role = payload.get("role", "member")
+    
+    if role not in ["owner", "admin", "technician", "member", "viewer"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid role. Must be: owner, admin, technician, member, or viewer",
+        )
+    
+    # Find user by email or user_id
+    user = None
+    if user_id_str:
+        try:
+            user_uuid = uuid.UUID(user_id_str)
+            user = db.query(User).filter(User.id == user_uuid).first()
+        except ValueError:
+            pass
+    
+    if not user and user_email:
+        user = db.query(User).filter(User.email == user_email).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    # Check if user is already a member
+    existing = WorkshopMemberCRUD.get_membership(db, workshop_uuid, user.id)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User is already a member of this workshop",
+        )
+    
+    # Add member
+    membership = WorkshopMemberCRUD.add_member(
+        db,
+        workshop_id=workshop_uuid,
+        user_id=user.id,
+        role=role,
+        invited_by=current_user.id,
+        created_by=current_user.id,
+    )
+    
+    # Include user information
+    return {
+        "id": str(membership.id),
+        "workshop_id": str(membership.workshop_id),
+        "user_id": str(membership.user_id),
+        "role": membership.role,
+        "is_active": membership.is_active,
+        "invited_by": str(membership.invited_by) if membership.invited_by else None,
+        "created_at": membership.created_at.isoformat() if membership.created_at else None,
+        "user": {
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+        },
+    }
+
+
+@router.delete("/{workshop_id}/members/{user_id}")
+def remove_member(
+    workshop_id: str,
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove a member from a workshop (requires admin or owner role)."""
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop ID or user ID",
+        )
+    
+    _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
+    
+    # Prevent removing owner
+    membership = WorkshopMemberCRUD.get_membership(db, workshop_uuid, user_uuid)
+    if membership and membership.role == "owner":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove workshop owner",
+        )
+    
+    # Prevent removing yourself
+    if user_uuid == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove yourself from the workshop",
+        )
+    
+    success = WorkshopMemberCRUD.remove_member(db, workshop_uuid, user_uuid, current_user.id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found",
+        )
+    
+    return {"message": "Member removed successfully"}
 
 
 @router.put("/{workshop_id}/customization")
