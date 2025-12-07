@@ -105,9 +105,14 @@ async def chat_websocket(
             db.close()
             return
         
-        # Ensure user is member of workshop
+        # Ensure user is member of workshop and check role
         try:
-            workshops._ensure_workshop_member(db, user.id, thread.workshop_id)
+            membership = workshops._ensure_workshop_member(db, user.id, thread.workshop_id)
+            # Viewers cannot access chat (read-only, can only view history)
+            if membership.role == "viewer":
+                await websocket.close(code=1008, reason="Viewers cannot access chat. Read-only access available in history.")
+                db.close()
+                return
         except HTTPException:
             await websocket.close(code=1008, reason="Not a member of this workshop")
             db.close()

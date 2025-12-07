@@ -73,7 +73,14 @@ async def create_thread(
         )
     
     # Ensure user is a member of the workshop
-    workshops._ensure_workshop_member(db, current_user.id, workshop_id)
+    membership = workshops._ensure_workshop_member(db, current_user.id, workshop_id)
+    
+    # Viewers cannot create chat sessions (read-only, can only view history)
+    if membership.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Viewers cannot create chat sessions. Read-only access available in history.",
+        )
     
     # Get or create vehicle
     vehicle = None
@@ -263,7 +270,7 @@ def delete_thread(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a chat thread and all its messages."""
+    """Delete a chat thread and all its messages (requires technician or higher role)."""
     try:
         thread_uuid = uuid.UUID(thread_id)
     except ValueError:
@@ -280,6 +287,10 @@ def delete_thread(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Thread not found",
         )
+    
+    # Require technician or higher role to delete chat threads (members can participate but not delete)
+    from app.api.v1 import workshops
+    workshops._ensure_workshop_member(db, current_user.id, thread.workshop_id, min_role="technician")
     
     try:
         # Delete all messages associated with the thread

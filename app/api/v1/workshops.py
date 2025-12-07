@@ -484,3 +484,38 @@ def update_workshop_customization(
     
     return workshop
 
+
+@router.delete("/{workshop_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_workshop(
+    workshop_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a workshop (requires owner role only)."""
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop ID",
+        )
+    
+    # Only owner can delete workshop
+    membership = _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="owner")
+    
+    if membership.role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workshop owner can delete the workshop",
+        )
+    
+    # Soft delete the workshop
+    success = WorkshopCRUD.delete(db, workshop_uuid, current_user.id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workshop not found",
+        )
+    
+    return None
+

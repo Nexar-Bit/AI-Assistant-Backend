@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -51,6 +53,27 @@ def register_vehicle(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Create a vehicle (requires technician or higher role)."""
+    from app.api.v1 import workshops
+    
+    workshop_id = payload.get("workshop_id")
+    if not workshop_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="workshop_id is required",
+        )
+    
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop_id",
+        )
+    
+    # Require technician or higher role to create vehicles
+    workshops._ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="technician")
+    
     plate = _validate_license_plate(payload.get("license_plate", ""))
 
     existing = db.query(Vehicle).filter(Vehicle.license_plate == plate).first()
@@ -116,6 +139,9 @@ def update_vehicle(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Update a vehicle (requires technician or higher role)."""
+    from app.api.v1 import workshops
+    
     vehicle = (
         db.query(Vehicle)
         .filter(
@@ -126,6 +152,10 @@ def update_vehicle(
     )
     if not vehicle:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    
+    # Require technician or higher role to update vehicles
+    if vehicle.workshop_id:
+        workshops._ensure_workshop_member(db, current_user.id, vehicle.workshop_id, min_role="technician")
 
     if "license_plate" in payload:
         plate = _validate_license_plate(payload["license_plate"])
@@ -157,6 +187,9 @@ def delete_vehicle(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Delete a vehicle (requires technician or higher role)."""
+    from app.api.v1 import workshops
+    
     vehicle = (
         db.query(Vehicle)
         .filter(
@@ -167,6 +200,10 @@ def delete_vehicle(
     )
     if not vehicle:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    # Require technician or higher role to delete vehicles
+    if vehicle.workshop_id:
+        workshops._ensure_workshop_member(db, current_user.id, vehicle.workshop_id, min_role="technician")
 
     db.delete(vehicle)
     db.commit()
