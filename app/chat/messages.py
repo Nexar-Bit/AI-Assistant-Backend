@@ -123,14 +123,17 @@ class MessageHandler:
         db.add(message)
         
         # Update thread token totals
+        from decimal import Decimal
+        
         thread = db.query(ChatThread).filter(ChatThread.id == thread_id).first()
         if thread:
             thread.total_prompt_tokens += prompt_tokens
             thread.total_completion_tokens += completion_tokens
             thread.total_tokens += total_tokens
             if thread.estimated_cost is None:
-                thread.estimated_cost = 0.0
-            thread.estimated_cost += estimated_cost or 0.0
+                thread.estimated_cost = Decimal('0.0')
+            if estimated_cost is not None:
+                thread.estimated_cost += Decimal(str(estimated_cost))
             thread.last_message_at = datetime.utcnow()
             db.add(thread)
         
