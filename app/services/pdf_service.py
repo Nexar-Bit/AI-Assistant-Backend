@@ -26,8 +26,21 @@ BRAND_PRIMARY_COLOR = "#0ea5e9"  # sky-500
 
 
 def _ensure_output_dir() -> Path:
+  """Ensure PDF output directory exists and is writable."""
+  import logging
+  logger = logging.getLogger(__name__)
+  
   out = Path(settings.PDF_OUTPUT_DIR)
-  out.mkdir(parents=True, exist_ok=True)
+  try:
+    out.mkdir(parents=True, exist_ok=True)
+    # Test write permissions
+    test_file = out / ".test_write"
+    test_file.touch()
+    test_file.unlink()
+    logger.debug(f"PDF output directory ready: {out}")
+  except Exception as e:
+    logger.error(f"Failed to create/access PDF output directory {out}: {e}", exc_info=True)
+    raise RuntimeError(f"Cannot access PDF output directory: {e}")
   return out
 
 
@@ -210,7 +223,39 @@ def _build_chat_thread_html(
         else "Unknown vehicle"
     )
     vehicle_vin = vehicle.vin if vehicle else "N/A"
-    vehicle_km = thread.vehicle_km if thread.vehicle_km else (vehicle.current_km if vehicle else None)
+    
+    # Handle vehicle_km - could be Decimal, int, float, or None
+    # Convert to int for safe formatting
+    vehicle_km = None
+    if thread.vehicle_km is not None:
+        try:
+            # Handle Decimal, int, float, or string
+            vehicle_km = int(float(str(thread.vehicle_km)))
+        except (ValueError, TypeError, AttributeError):
+            vehicle_km = None
+    elif vehicle and vehicle.current_km is not None:
+        try:
+            vehicle_km = int(float(str(vehicle.current_km)))
+        except (ValueError, TypeError, AttributeError):
+            vehicle_km = None
+    
+    # Handle total_tokens - ensure it's an integer
+    total_tokens = 0
+    if thread.total_tokens is not None:
+        try:
+            total_tokens = int(thread.total_tokens)
+        except (ValueError, TypeError):
+            total_tokens = 0
+    
+    # Handle estimated_cost - convert Decimal to float safely
+    estimated_cost_str = ""
+    if thread.estimated_cost is not None:
+        try:
+            cost_value = float(str(thread.estimated_cost))
+            if cost_value != 0:
+                estimated_cost_str = f"${cost_value:.4f}"
+        except (ValueError, TypeError, AttributeError):
+            estimated_cost_str = ""
     
     # Build messages HTML
     messages_html = ""
@@ -227,7 +272,7 @@ def _build_chat_thread_html(
             """
         elif msg.role == "assistant":
             model_badge = f'<span class="badge">{msg.ai_model_used or "AI"}</span>' if msg.ai_model_used else ""
-            tokens_info = f'<span class="tokens-info">Tokens: {msg.total_tokens}</span>' if msg.total_tokens > 0 else ""
+            tokens_info = f'<span class="tokens-info">Tokens: {msg.total_tokens or 0}</span>' if (msg.total_tokens and msg.total_tokens > 0) else ""
             messages_html += f"""
             <div class="message ai-message">
               <div class="message-header">
@@ -454,7 +499,7 @@ def _build_chat_thread_html(
           <span class="summary-value">{header_vehicle}</span>
         </div>
         {f'<div class="summary-row"><span class="summary-label">VIN:</span><span class="summary-value">{vehicle_vin}</span></div>' if vehicle_vin != "N/A" else ""}
-        {f'<div class="summary-row"><span class="summary-label">Mileage (km):</span><span class="summary-value">{vehicle_km:,}</span></div>' if vehicle_km else ""}
+        {f'<div class="summary-row"><span class="summary-label">Mileage (km):</span><span class="summary-value">{vehicle_km:,}</span></div>' if (vehicle_km is not None and isinstance(vehicle_km, (int, float))) else ""}
       </div>
     </div>
 
@@ -471,9 +516,9 @@ def _build_chat_thread_html(
         </div>
         <div class="summary-row">
           <span class="summary-label">Total Tokens Used:</span>
-          <span class="summary-value">{thread.total_tokens:,}</span>
+          <span class="summary-value">{total_tokens:,}</span>
         </div>
-        {f'<div class="summary-row"><span class="summary-label">Estimated Cost:</span><span class="summary-value">${float(thread.estimated_cost):.4f}</span></div>' if thread.estimated_cost else ""}
+        {f'<div class="summary-row"><span class="summary-label">Estimated Cost:</span><span class="summary-value">{estimated_cost_str}</span></div>' if estimated_cost_str else ""}
       </div>
       {messages_html}
     </div>
