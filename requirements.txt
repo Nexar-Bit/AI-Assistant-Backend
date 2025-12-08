@@ -12,7 +12,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.1.2
 python-multipart==0.0.12
 cryptography==43.0.1
-weasyprint==62.3
+weasyprint>=63.0
 redis==5.1.1
 structlog==24.4.0
 opentelemetry-sdk==1.26.0
