@@ -30,14 +30,31 @@ def _ensure_output_dir() -> Path:
   import logging
   logger = logging.getLogger(__name__)
   
-  out = Path(settings.PDF_OUTPUT_DIR)
+  # Use absolute path to avoid issues with relative paths
+  # On Render, use /tmp for writable directory
+  pdf_dir = settings.PDF_OUTPUT_DIR
+  if not os.path.isabs(pdf_dir):
+    if os.path.exists("/tmp"):
+      # Render or Linux system - use /tmp
+      pdf_dir = f"/tmp/{pdf_dir}"
+    else:
+      # Local development - use project root
+      pdf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), pdf_dir)
+  
+  out = Path(pdf_dir)
   try:
     out.mkdir(parents=True, exist_ok=True)
     # Test write permissions
     test_file = out / ".test_write"
     test_file.touch()
     test_file.unlink()
-    logger.debug(f"PDF output directory ready: {out}")
+    logger.info(f"PDF output directory ready: {out.absolute()}")
+  except PermissionError as e:
+    logger.error(f"Permission denied creating PDF output directory {out}: {e}", exc_info=True)
+    raise RuntimeError(f"Cannot create PDF output directory (permission denied): {out}")
+  except OSError as e:
+    logger.error(f"OS error creating PDF output directory {out}: {e}", exc_info=True)
+    raise RuntimeError(f"Cannot create PDF output directory: {e}")
   except Exception as e:
     logger.error(f"Failed to create/access PDF output directory {out}: {e}", exc_info=True)
     raise RuntimeError(f"Cannot access PDF output directory: {e}")
@@ -586,21 +603,55 @@ def generate_chat_thread_pdf(
 
         html = _build_chat_thread_html(thread, messages, user, vehicle)
         logger.debug(f"HTML generated, length: {len(html)}")
+        
+        # Validate HTML before attempting PDF generation
+        if not html or len(html.strip()) < 100:
+            logger.error(f"Generated HTML is too short or empty: {len(html) if html else 0} characters")
+            raise RuntimeError("Failed to generate valid HTML content for PDF")
+        
+        # Check for common HTML issues that could break WeasyPrint
+        if "<html" not in html.lower() or "</html>" not in html.lower():
+            logger.error("Generated HTML is missing required HTML tags")
+            raise RuntimeError("Generated HTML is malformed")
 
         try:
+            # Validate HTML is not empty
+            if not html or len(html.strip()) == 0:
+                raise RuntimeError("Generated HTML is empty")
+            
+            logger.debug(f"Attempting to write PDF to {file_path}")
             HTML(string=html).write_pdf(
                 target=str(file_path),
                 stylesheets=[CSS(string="@page { size: A4; margin: 16mm; }")],
             )
             logger.info(f"PDF written to: {file_path}")
+        except ImportError as e:
+            logger.error(f"WeasyPrint import error: {e}", exc_info=True)
+            raise RuntimeError("WeasyPrint is not properly installed. Please check system dependencies.")
+        except OSError as e:
+            logger.error(f"OS error writing PDF file (permissions?): {e}", exc_info=True)
+            raise RuntimeError(f"Cannot write PDF file (permission or disk space issue): {str(e)}")
         except Exception as e:
-            logger.error(f"Error writing PDF file: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to write PDF file: {str(e)}")
+            logger.error(f"Error writing PDF file: {type(e).__name__}: {e}", exc_info=True)
+            # Provide more specific error message
+            error_msg = str(e)
+            if "super" in error_msg.lower() or "transform" in error_msg.lower():
+                raise RuntimeError("WeasyPrint version incompatibility. Please ensure WeasyPrint is compatible with Python version.")
+            raise RuntimeError(f"Failed to write PDF file: {error_msg}")
 
         if not os.path.exists(file_path):
+            logger.error(f"PDF file was not created at {file_path}")
+            # Check if directory exists and is writable
+            if not os.path.exists(out_dir):
+                raise RuntimeError(f"PDF output directory does not exist: {out_dir}")
+            if not os.access(out_dir, os.W_OK):
+                raise RuntimeError(f"PDF output directory is not writable: {out_dir}")
             raise RuntimeError(f"PDF file was not created at {file_path}")
 
         size = file_path.stat().st_size
+        if size == 0:
+            logger.warning(f"PDF file is empty (0 bytes): {file_path}")
+            raise RuntimeError("Generated PDF file is empty")
         logger.info(f"PDF file size: {size} bytes")
 
         if existing:

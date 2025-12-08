@@ -262,8 +262,16 @@ def download_report_for_chat_thread(
                 vehicle=vehicle,
             )
             logger.info(f"PDF generated successfully: {pdf.file_path}")
+        except RuntimeError as e:
+            # RuntimeError from PDF service with specific error message
+            logger.error(f"PDF generation runtime error for thread {thread_id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"PDF generation failed: {str(e)}",
+            )
         except Exception as e:
-            logger.error(f"Error generating PDF for thread {thread_id}: {e}", exc_info=True)
+            # Catch-all for unexpected errors
+            logger.error(f"Unexpected error generating PDF for thread {thread_id}: {type(e).__name__}: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate PDF: {str(e)}",
