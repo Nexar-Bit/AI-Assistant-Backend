@@ -2,7 +2,8 @@ services:
   - type: web
     name: ai-assist-backend
     env: python
-    # Python version is specified in runtime.txt (must be in repository root)
+    # Python version is specified in .python-version (preferred) or runtime.txt in repository root
+    # Also set PYTHON_VERSION=3.12.7 environment variable in Render dashboard
     # This ensures Python 3.12.7 is used (required for WeasyPrint compatibility)
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
