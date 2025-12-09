@@ -4,7 +4,7 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, require_superuser
@@ -20,6 +20,8 @@ router = APIRouter(prefix="/ai-providers", tags=["ai-providers"])
 # Pydantic Schemas
 class AIProviderCreate(BaseModel):
     """Schema for creating an AI provider."""
+    model_config = ConfigDict(protected_namespaces=())
+    
     name: str = Field(..., min_length=1, max_length=100)
     provider_type: AIProviderType
     api_key: Optional[str] = None
@@ -33,6 +35,8 @@ class AIProviderCreate(BaseModel):
 
 class AIProviderUpdate(BaseModel):
     """Schema for updating an AI provider."""
+    model_config = ConfigDict(protected_namespaces=())
+    
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     provider_type: Optional[AIProviderType] = None
     api_key: Optional[str] = None
@@ -46,6 +50,8 @@ class AIProviderUpdate(BaseModel):
 
 class AIProviderResponse(BaseModel):
     """Schema for AI provider response (hides API key)."""
+    model_config = ConfigDict(protected_namespaces=(), from_attributes=True)
+    
     id: uuid.UUID
     name: str
     provider_type: str
@@ -58,9 +64,6 @@ class AIProviderResponse(BaseModel):
     has_api_key: bool  # Don't expose the actual key
     created_at: str
     updated_at: str
-
-    class Config:
-        from_attributes = True
 
 
 class WorkshopAIProviderAssign(BaseModel):
