@@ -10,6 +10,16 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.messages import (
+    CHAT_WORKSHOP_ID_REQUIRED,
+    CHAT_INVALID_WORKSHOP_ID,
+    CHAT_VIEWER_CANNOT_CREATE,
+    CHAT_INVALID_THREAD_ID,
+    CHAT_THREAD_NOT_FOUND,
+    CHAT_MESSAGE_CONTENT_REQUIRED,
+    CHAT_OPENAI_NOT_CONFIGURED,
+    ERROR_INTERNAL_SERVER,
+)
 from app.models.user import User
 from app.models.vehicle import Vehicle
 from app.chat import ChatThread, ChatMessage, ChatSessionManager, MessageHandler, ChatContextBuilder, connection_manager
@@ -34,7 +44,7 @@ def get_ai_provider() -> OpenAIProvider:
     if not settings.OPENAI_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenAI API key is not configured",
+            detail=CHAT_OPENAI_NOT_CONFIGURED,
         )
     return OpenAIProvider(api_key=settings.OPENAI_API_KEY, default_model="gpt-4o-mini")
 
@@ -61,7 +71,7 @@ async def create_thread(
     if not workshop_id_str or not license_plate:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="workshop_id and license_plate are required",
+            detail=CHAT_WORKSHOP_ID_REQUIRED,
         )
     
     try:
@@ -69,7 +79,7 @@ async def create_thread(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid workshop_id",
+            detail=CHAT_INVALID_WORKSHOP_ID,
         )
     
     # Ensure user is a member of the workshop
@@ -79,7 +89,7 @@ async def create_thread(
     if membership.role == "viewer":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Viewers cannot create chat sessions. Read-only access available in history.",
+            detail=CHAT_VIEWER_CANNOT_CREATE,
         )
     
     # Get or create vehicle
@@ -158,7 +168,7 @@ def list_threads(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid workshop_id",
+            detail=CHAT_INVALID_WORKSHOP_ID,
         )
     
     # Use ChatSessionManager to list threads
@@ -201,7 +211,7 @@ def get_thread(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid thread_id",
+            detail=CHAT_INVALID_THREAD_ID,
         )
     
     # Get thread using ChatSessionManager
@@ -210,7 +220,7 @@ def get_thread(
     if not thread:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thread not found",
+            detail=CHAT_THREAD_NOT_FOUND,
         )
     
     # Get messages using MessageHandler
@@ -235,7 +245,7 @@ def update_thread(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid thread_id",
+            detail=CHAT_INVALID_THREAD_ID,
         )
     
     # Get thread using ChatSessionManager
@@ -244,7 +254,7 @@ def update_thread(
     if not thread:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thread not found",
+            detail=CHAT_THREAD_NOT_FOUND,
         )
     
     # Update fields if provided
@@ -276,7 +286,7 @@ def delete_thread(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid thread_id",
+            detail=CHAT_INVALID_THREAD_ID,
         )
     
     # Get thread using ChatSessionManager to ensure user has access
@@ -285,7 +295,7 @@ def delete_thread(
     if not thread:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thread not found",
+            detail=CHAT_THREAD_NOT_FOUND,
         )
     
     # Require technician or higher role to delete chat threads (members can participate but not delete)
@@ -319,7 +329,7 @@ def delete_thread(
         logger.error("Failed to delete thread %s: %s", thread_uuid, e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete thread",
+            detail=ERROR_INTERNAL_SERVER,
         )
 
 
@@ -336,7 +346,7 @@ async def send_message(
     if not content:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Message content is required",
+            detail=CHAT_MESSAGE_CONTENT_REQUIRED,
         )
     
     try:
@@ -344,7 +354,7 @@ async def send_message(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid thread_id",
+            detail=CHAT_INVALID_THREAD_ID,
         )
     
     # Get thread using ChatSessionManager
@@ -353,7 +363,7 @@ async def send_message(
     if not thread:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thread not found",
+            detail=CHAT_THREAD_NOT_FOUND,
         )
     
     # Ensure user is still a member of the workshop
@@ -518,7 +528,7 @@ def get_dashboard_stats(
         if workshop_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid workshop_id",
+                detail=CHAT_INVALID_WORKSHOP_ID,
             )
         workshop_uuid = None
     

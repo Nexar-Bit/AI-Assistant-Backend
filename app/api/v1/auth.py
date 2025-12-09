@@ -18,6 +18,27 @@ from app.api.dependencies import (
 )
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.messages import (
+    AUTH_INVALID_CREDENTIALS,
+    AUTH_USER_INACTIVE,
+    AUTH_EMAIL_NOT_VERIFIED,
+    AUTH_REFRESH_TOKEN_INVALID,
+    AUTH_REFRESH_TOKEN_PAYLOAD_INVALID,
+    AUTH_REFRESH_TOKEN_REVOKED,
+    AUTH_USER_ID_INVALID,
+    AUTH_USER_NOT_FOUND_OR_INACTIVE,
+    AUTH_LOGOUT_SUCCESS,
+    REG_SUCCESS,
+    REG_USERNAME_EXISTS,
+    REG_EMAIL_EXISTS,
+    EMAIL_VERIFICATION_SUCCESS,
+    EMAIL_VERIFICATION_FAILED,
+    EMAIL_VERIFICATION_EXPIRED,
+    EMAIL_VERIFICATION_ALREADY_VERIFIED,
+    EMAIL_VERIFICATION_RESENT,
+    EMAIL_REQUIRED,
+    EMAIL_ALREADY_VERIFIED,
+)
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -105,7 +126,7 @@ def login(
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail=AUTH_INVALID_CREDENTIALS,
         )
     
     # Check if email is verified
@@ -121,13 +142,13 @@ def login(
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Please verify your email address before logging in. Check your inbox for the verification link.",
+            detail=AUTH_EMAIL_NOT_VERIFIED,
         )
 
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is inactive",
+            detail=AUTH_USER_INACTIVE,
         )
 
     reset_login_attempts(form_data.username)
@@ -200,7 +221,7 @@ def refresh_token(
         logger.warning(f"Invalid refresh token: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token",
+            detail=AUTH_REFRESH_TOKEN_INVALID,
         )
 
     user_id: str | None = payload.get("sub")
@@ -208,13 +229,13 @@ def refresh_token(
     if not user_id or not jti:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token payload",
+            detail=AUTH_REFRESH_TOKEN_PAYLOAD_INVALID,
         )
 
     if not is_refresh_token_active(user_id, jti):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token has been rotated or revoked",
+            detail=AUTH_REFRESH_TOKEN_REVOKED,
         )
 
     # Convert user_id string to UUID for database query
@@ -224,14 +245,14 @@ def refresh_token(
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user ID format",
+            detail=AUTH_USER_ID_INVALID,
         )
     
     user = db.query(User).filter(User.id == user_uuid).first()
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive",
+            detail=AUTH_USER_NOT_FOUND_OR_INACTIVE,
         )
 
     # rotate: revoke old and issue new
@@ -291,7 +312,7 @@ def logout(
         details={},
     )
 
-    return {"detail": "Logged out"}
+    return {"detail": AUTH_LOGOUT_SUCCESS}
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -310,12 +331,12 @@ def register(
         if existing_user.username == register_data.username:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Username already taken",
+                detail=REG_USERNAME_EXISTS,
             )
         if existing_user.email == register_data.email:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Email already registered",
+                detail=REG_EMAIL_EXISTS,
             )
     
     # Hash password
@@ -372,7 +393,7 @@ def register(
     )
     
     return {
-        "message": "Registration successful. Please check your email to verify your account.",
+        "message": REG_SUCCESS,
         "user_id": str(user.id),
         "email": user.email,
         "email_verification_required": True,
@@ -395,14 +416,14 @@ def verify_email(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token",
+            detail=EMAIL_VERIFICATION_FAILED,
         )
     
     # Check if token has expired
     if user.email_verification_expires_at and user.email_verification_expires_at < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification token has expired. Please request a new one.",
+            detail=EMAIL_VERIFICATION_EXPIRED,
         )
     
     # Verify email and activate account
@@ -426,7 +447,7 @@ def verify_email(
     )
     
     return {
-        "message": "Email verified successfully. Your account is now active.",
+        "message": EMAIL_VERIFICATION_SUCCESS,
         "user_id": str(user.id),
         "email": user.email,
     }
@@ -443,20 +464,20 @@ def resend_verification(
     if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is required",
+            detail=EMAIL_REQUIRED,
         )
     
     user = db.query(User).filter(User.email == email).first()
     if not user:
         # Don't reveal if email exists or not (security best practice)
         return {
-            "message": "If an account exists with this email, a verification link has been sent.",
+            "message": EMAIL_VERIFICATION_RESENT,
         }
     
     if user.email_verified:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is already verified",
+            detail=EMAIL_ALREADY_VERIFIED,
         )
     
     # Generate new verification token
@@ -478,7 +499,7 @@ def resend_verification(
         )
     
     return {
-        "message": "If an account exists with this email, a verification link has been sent.",
+        "message": EMAIL_VERIFICATION_RESENT,
     }
 
 

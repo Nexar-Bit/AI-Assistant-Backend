@@ -314,24 +314,34 @@ async def chat_websocket(
         logger.info("WebSocket disconnected: thread_id=%s, user_id=%s", thread_id, user.id)
     except Exception as e:
         logger.error("WebSocket error: %s", e, exc_info=True)
-        error_message = "Internal server error"
+        from app.core.messages import (
+            ERROR_INTERNAL_SERVER,
+            AI_SERVICE_CONFIG_ERROR,
+            TOKEN_LIMIT_EXCEEDED,
+            DB_CONNECTION_ERROR,
+            ERROR_NOT_FOUND,
+            ERROR_PERMISSION_DENIED,
+            ERROR_TIMEOUT,
+        )
+        
+        error_message = ERROR_INTERNAL_SERVER
         
         # Provide more specific error messages based on exception type
         error_type = type(e).__name__
         error_str = str(e)
         
         if "OPENAI_API_KEY" in error_str or "api key" in error_str.lower():
-            error_message = "AI service configuration error. Please contact your administrator."
+            error_message = AI_SERVICE_CONFIG_ERROR
         elif "token" in error_str.lower() and ("limit" in error_str.lower() or "exceeded" in error_str.lower()):
-            error_message = "Token limit exceeded. Please try again later or contact your administrator."
+            error_message = TOKEN_LIMIT_EXCEEDED
         elif "database" in error_str.lower() or "connection" in error_str.lower() or "sql" in error_str.lower():
-            error_message = "Database connection error. Please try again."
+            error_message = DB_CONNECTION_ERROR
         elif "not found" in error_str.lower() or "404" in error_str:
-            error_message = "Resource not found. Please refresh and try again."
+            error_message = ERROR_NOT_FOUND
         elif "permission" in error_str.lower() or "forbidden" in error_str.lower() or "403" in error_str:
-            error_message = "You don't have permission to perform this action."
+            error_message = ERROR_PERMISSION_DENIED
         elif "timeout" in error_str.lower():
-            error_message = "Request timed out. Please try again."
+            error_message = ERROR_TIMEOUT
         else:
             # For debugging, include error type in development
             import os

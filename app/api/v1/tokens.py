@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.messages import WORKSHOP_INVALID_ID, TOKEN_WORKSHOP_ID_REQUIRED
 from app.models.user import User
 from app.tokens import TokenAccountingService
 from app.services.token_notifications import TokenNotificationService
@@ -36,7 +37,7 @@ def get_remaining_tokens(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid workshop_id",
+            detail=WORKSHOP_INVALID_ID,
         )
     
     # Ensure user is member of workshop
@@ -76,7 +77,7 @@ async def validate_tokens(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid workshop_id",
+            detail=WORKSHOP_INVALID_ID,
         )
     
     # Ensure user is member of workshop
@@ -110,7 +111,7 @@ def get_workshop_token_usage(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid workshop_id",
+            detail=WORKSHOP_INVALID_ID,
         )
     
     # Ensure user is admin or owner
