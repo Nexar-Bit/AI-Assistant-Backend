@@ -29,7 +29,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 def get_ai_provider() -> OpenAIProvider:
-    """Get OpenAI provider instance."""
+    """Get OpenAI provider instance (fallback for backward compatibility)."""
     from app.core.config import settings
     if not settings.OPENAI_API_KEY:
         raise HTTPException(
@@ -39,8 +39,74 @@ def get_ai_provider() -> OpenAIProvider:
     return OpenAIProvider(api_key=settings.OPENAI_API_KEY, default_model="gpt-4o-mini")
 
 
+def get_workshop_ai_provider(workshop_id: uuid.UUID, db: Session) -> tuple[ChatAIProvider, str]:
+    """
+    Get AI provider assigned to a workshop.
+    Returns tuple of (ChatAIProvider, model_name).
+    Returns the first enabled provider assigned to the workshop, or falls back to default.
+    """
+    from app.models.ai_provider import WorkshopAIProvider, AIProvider
+    
+    # Get assigned providers for this workshop, ordered by priority
+    assignments = db.query(WorkshopAIProvider).filter(
+        WorkshopAIProvider.workshop_id == workshop_id,
+        WorkshopAIProvider.is_enabled == True,
+    ).order_by(WorkshopAIProvider.priority).all()
+    
+    if not assignments:
+        # No provider assigned - use default (for backward compatibility)
+        # In production, you might want to raise an error instead
+        from app.core.config import settings
+        if settings.OPENAI_API_KEY:
+            model = "gpt-4o-mini"
+            return (ChatAIProvider(OpenAIProvider(api_key=settings.OPENAI_API_KEY, default_model=model)), model)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No AI provider assigned to this workshop. Please contact your administrator.",
+        )
+    
+    # Get the first enabled provider (highest priority)
+    assignment = assignments[0]
+    provider = db.query(AIProvider).filter(
+        AIProvider.id == assignment.ai_provider_id,
+        AIProvider.is_active == True,
+    ).first()
+    
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Assigned AI provider is not available. Please contact your administrator.",
+        )
+    
+    # Use custom API key if provided, otherwise use provider's API key
+    api_key = assignment.custom_api_key or provider.api_key
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI provider API key is not configured.",
+        )
+    
+    # Use custom model if provided, otherwise use provider's model
+    model = assignment.custom_model or provider.model_name or "gpt-4o-mini"
+    
+    # Use custom endpoint if provided, otherwise use provider's endpoint
+    endpoint = assignment.custom_endpoint or provider.api_endpoint
+    
+    # For now, we only support OpenAI provider type
+    # In the future, this could be extended to support other providers
+    if provider.provider_type not in ["openai", "azure_openai"]:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"AI provider type '{provider.provider_type}' is not yet supported.",
+        )
+    
+    # Create OpenAI provider with the appropriate API key and model
+    openai_provider = OpenAIProvider(api_key=api_key, default_model=model)
+    return (ChatAIProvider(openai_provider), model)
+
+
 def get_chat_provider() -> ChatAIProvider:
-    """Get chat AI provider instance."""
+    """Get chat AI provider instance (fallback for backward compatibility)."""
     return ChatAIProvider(get_ai_provider())
 
 
@@ -329,7 +395,6 @@ async def send_message(
     payload: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    chat_provider: ChatAIProvider = Depends(get_chat_provider),
 ):
     """Send a message in a chat thread and get AI response."""
     content = payload.get("content")
@@ -358,6 +423,17 @@ async def send_message(
     
     # Ensure user is still a member of the workshop
     workshops._ensure_workshop_member(db, current_user.id, thread.workshop_id)
+    
+    # Get AI provider assigned to this workshop
+    try:
+        chat_provider, model_name = get_workshop_ai_provider(thread.workshop_id, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to get AI provider: {str(e)}",
+        )
     
     # Get existing messages using MessageHandler
     existing_messages = MessageHandler.get_thread_messages(db, thread_uuid)
@@ -431,7 +507,7 @@ async def send_message(
         user_id=str(current_user.id),
         messages=chat_messages,
         vehicle_context=thread.vehicle_context,
-        model="gpt-4o-mini",
+        model=model_name,
         temperature=0.1,
         max_tokens=800,
     )

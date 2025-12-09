@@ -1,5 +1,14 @@
 #!/bin/bash
 # Start script for Render deployment
+set -e
+
+# Run database migrations
+echo "Running database migrations..."
+alembic upgrade head
+
+# Check migration status
+echo "Current migration status:"
+alembic current
 
 # Get port from environment (Render provides this)
 PORT=${PORT:-8000}

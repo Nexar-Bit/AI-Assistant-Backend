@@ -16,7 +16,7 @@ from app.services.chat_ai_service import ChatAIProvider, ChatMessage as ChatMsg,
 from app.services.openai_service import OpenAIProvider
 from app.tokens.accounting import TokenAccountingService
 from app.tokens.limits import TokenLimitsService
-from app.api.v1 import workshops
+from app.api.v1 import workshops, chat
 from jose import JWTError
 
 
@@ -129,18 +129,25 @@ async def chat_websocket(
             "timestamp": datetime.utcnow().isoformat(),
         })
         
-        # Get AI provider
-        from app.core.config import settings
-        if not settings.OPENAI_API_KEY:
+        # Get AI provider assigned to this workshop
+        try:
+            chat_provider, model_name = chat.get_workshop_ai_provider(thread.workshop_id, db)
+        except HTTPException as e:
             await websocket.send_json({
                 "type": "error",
-                "message": "AI service not configured",
+                "message": e.detail,
+            })
+            db.close()
+            return
+        except Exception as e:
+            logger.error(f"Failed to get AI provider for workshop {thread.workshop_id}: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "message": "AI service is not available. Please contact your administrator.",
             })
             db.close()
             return
         
-        ai_provider = OpenAIProvider(api_key=settings.OPENAI_API_KEY, default_model="gpt-4o-mini")
-        chat_provider = ChatAIProvider(ai_provider)
         context_builder = ChatContextBuilder()
         
         # Message loop - keep DB session open for entire connection
@@ -238,7 +245,7 @@ async def chat_websocket(
                     user_id=str(user.id),
                     messages=chat_messages,
                     vehicle_context=thread.vehicle_context,
-                    model="gpt-4o-mini",
+                    model=model_name,
                     temperature=0.1,
                     max_tokens=800,
                 )
