@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str | None = None
     SMTP_FROM_NAME: str = "Vehicle Diagnostics AI"
     FRONTEND_URL: str = "http://localhost:5173"
+    
+    # Registration settings
+    AUTO_APPROVE_REGISTRATION: bool = False  # If True, users are auto-approved
+    ADMIN_NOTIFICATION_EMAIL: str | None = None  # Email to notify for new registrations
 
     @field_validator("ENVIRONMENT")
     @classmethod

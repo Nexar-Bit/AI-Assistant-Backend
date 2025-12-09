@@ -27,7 +27,7 @@ def get_ai_provider() -> OpenAIProvider:
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=CHAT_OPENAI_NOT_CONFIGURED,
+            detail="OpenAI API key is not configured. Please set OPENAI_API_KEY in your environment variables.",
         )
     return OpenAIProvider(api_key=api_key, default_model="gpt-4o-mini")
 
@@ -121,7 +121,7 @@ def get_consultation(
         .first()
     )
     if not consultation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     return consultation
 
 
@@ -232,12 +232,12 @@ async def update_consultation(
         .first()
     )
     if not consultation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     if consultation.version != expected_version:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=CONSULTATION_MODIFIED_BY_ANOTHER_PROCESS,
+            detail="Consultation has been modified by another process",
         )
 
     # allow updating resolution status and notes
@@ -278,7 +278,7 @@ async def delete_consultation(
         .first()
     )
     if not consultation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     db.delete(consultation)
     db.commit()

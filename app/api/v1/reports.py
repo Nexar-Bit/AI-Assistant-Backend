@@ -10,12 +10,6 @@ import uuid
 
 from app.api.dependencies import get_current_user
 from app.core.database import get_db
-from app.core.messages import (
-    REPORT_NOT_FOUND,
-    REPORT_INVALID_THREAD_ID,
-    REPORT_THREAD_NOT_FOUND,
-    REPORT_PDF_NOT_FOUND,
-)
 from app.models.consultation import Consultation
 from app.models.consultation_pdf import ConsultationPDF
 from app.models.chat_thread_pdf import ChatThreadPDF
@@ -46,7 +40,7 @@ def generate_report_for_consultation(
         .first()
     )
     if not consultation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=REPORT_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     vehicle = (
         db.query(Vehicle)
@@ -110,7 +104,7 @@ def download_report_for_consultation(
         .first()
     )
     if not consultation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=REPORT_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     vehicle = (
         db.query(Vehicle)
@@ -190,7 +184,7 @@ def generate_report_for_chat_thread(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=REPORT_INVALID_THREAD_ID,
+            detail="Invalid thread_id",
         )
     
     # Get thread using ChatSessionManager to ensure user has access
@@ -198,7 +192,7 @@ def generate_report_for_chat_thread(
     if not thread:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=REPORT_THREAD_NOT_FOUND,
+            detail="Thread not found",
         )
     
     # Get all messages
@@ -236,7 +230,7 @@ def download_report_for_chat_thread(
         logger.error(f"Invalid thread_id format: {thread_id}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=REPORT_INVALID_THREAD_ID,
+            detail="Invalid thread_id",
         )
     
     try:
@@ -246,7 +240,7 @@ def download_report_for_chat_thread(
             logger.warning(f"Thread not found: {thread_id} for user {current_user.id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=REPORT_THREAD_NOT_FOUND,
+                detail="Thread not found",
             )
         
         # Get all messages
@@ -309,7 +303,7 @@ def download_report_for_chat_thread(
             logger.error(f"PDF file not found at path: {pdf.file_path}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=REPORT_PDF_NOT_FOUND,
+                detail="PDF file not found",
             )
         
         return FileResponse(

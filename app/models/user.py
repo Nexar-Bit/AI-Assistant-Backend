@@ -19,5 +19,9 @@ class User(TimestampedUUIDModel):
     email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_verification_expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Auto-registration fields
+    registration_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    registration_approved: Mapped[bool] = mapped_column(Boolean, default=False)
 
 

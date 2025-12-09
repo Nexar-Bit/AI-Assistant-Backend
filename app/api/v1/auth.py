@@ -61,6 +61,7 @@ class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
+    registration_message: str | None = None  # Optional message for manual approval
 
     @field_validator("username")
     @classmethod
@@ -78,6 +79,13 @@ class RegisterRequest(BaseModel):
     def validate_password(cls, v: str) -> str:
         if len(v) < 12:
             raise ValueError("Password must be at least 12 characters long")
+        return v
+    
+    @field_validator("registration_message")
+    @classmethod
+    def validate_message(cls, v: str | None) -> str | None:
+        if v and len(v) > 500:
+            raise ValueError("Registration message must be less than 500 characters")
         return v
 
 
@@ -149,6 +157,13 @@ def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=AUTH_USER_INACTIVE,
+        )
+    
+    # Check if registration was approved
+    if not user.registration_approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu registro está pendiente de aprobación por un administrador.",
         )
 
     reset_login_attempts(form_data.username)
@@ -352,17 +367,22 @@ def register(
     verification_token = uuid.uuid4().hex
     verification_expires = datetime.now(timezone.utc) + timedelta(hours=24)
     
-    # Create user (inactive until email is verified)
+    # Determine if auto-approval is enabled
+    auto_approve = settings.AUTO_APPROVE_REGISTRATION
+    
+    # Create user
     user = User(
         id=uuid.uuid4(),
         username=register_data.username,
         email=register_data.email,
         password_hash=password_hash,
         role="technician",  # Default role
-        is_active=False,  # Inactive until email verified
+        is_active=False,  # Inactive until email verified and approved
         email_verified=False,
         email_verification_token=verification_token,
         email_verification_expires_at=verification_expires,
+        registration_message=register_data.registration_message,
+        registration_approved=auto_approve,  # Auto-approve based on config
     )
     
     db.add(user)
@@ -378,6 +398,16 @@ def register(
         )
         if not email_sent:
             logger.warning("Failed to send verification email to %s", register_data.email)
+        
+        # Notify admin if manual approval is required
+        if not auto_approve and settings.ADMIN_NOTIFICATION_EMAIL:
+            email_service.send_registration_notification(
+                to_email=settings.ADMIN_NOTIFICATION_EMAIL,
+                username=register_data.username,
+                email=register_data.email,
+                message=register_data.registration_message,
+                user_id=str(user.id),
+            )
     else:
         logger.warning("Email service not configured. Verification email not sent to %s", register_data.email)
     
@@ -389,14 +419,15 @@ def register(
         success=True,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
-        details={"email": register_data.email},
+        details={"email": register_data.email, "auto_approved": auto_approve},
     )
     
     return {
-        "message": REG_SUCCESS,
+        "message": REG_SUCCESS if auto_approve else "Registro enviado para aprobación. Recibirás un correo cuando sea aprobado.",
         "user_id": str(user.id),
         "email": user.email,
         "email_verification_required": True,
+        "requires_approval": not auto_approve,
     }
 
 

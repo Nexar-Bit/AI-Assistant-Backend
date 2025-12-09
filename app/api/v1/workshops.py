@@ -8,25 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
 from app.core.database import get_db
-from app.core.messages import (
-    WORKSHOP_NOT_MEMBER,
-    WORKSHOP_REQUIRES_ROLE,
-    WORKSHOP_NAME_REQUIRED,
-    WORKSHOP_SLUG_EXISTS,
-    WORKSHOP_INVALID_ID,
-    WORKSHOP_NOT_FOUND,
-    WORKSHOP_MEMBERSHIP_INACTIVE,
-    WORKSHOP_INVALID_ROLE,
-    WORKSHOP_CANNOT_CHANGE_OWNER,
-    WORKSHOP_MEMBER_NOT_FOUND,
-    WORKSHOP_USER_NOT_FOUND,
-    WORKSHOP_USER_ALREADY_MEMBER,
-    WORKSHOP_CANNOT_REMOVE_OWNER,
-    WORKSHOP_CANNOT_REMOVE_SELF,
-    WORKSHOP_INVALID_COLOR,
-    WORKSHOP_ONLY_OWNER_DELETE,
-    WORKSHOP_INVALID_WORKSHOP_OR_USER_ID,
-)
 from app.models.user import User
 from app.workshops import Workshop, WorkshopMember, WorkshopCRUD, WorkshopMemberCRUD
 from app.workshops.middleware import require_workshop_membership
@@ -68,7 +49,7 @@ def _ensure_workshop_member(
     if not membership:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=WORKSHOP_NOT_MEMBER,
+            detail="You are not a member of this workshop",
         )
     
     role_hierarchy = {"viewer": 0, "member": 1, "technician": 2, "admin": 3, "owner": 4}
@@ -78,7 +59,7 @@ def _ensure_workshop_member(
     if user_role_level < required_level:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=WORKSHOP_REQUIRES_ROLE.format(role=min_role),
+            detail=f"Requires {min_role} role or higher",
         )
     
     return membership
@@ -109,7 +90,7 @@ def create_workshop(
     if not name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_NAME_REQUIRED,
+            detail="Workshop name is required",
         )
     
     # Check slug uniqueness using WorkshopCRUD
@@ -117,7 +98,7 @@ def create_workshop(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=WORKSHOP_SLUG_EXISTS,
+            detail="Workshop slug already exists",
         )
     
     # Create workshop using WorkshopCRUD
@@ -145,7 +126,7 @@ def get_workshop(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ID,
+            detail="Invalid workshop ID",
         )
     
     _ensure_workshop_member(db, current_user.id, workshop_uuid)
@@ -154,7 +135,7 @@ def get_workshop(
     if not workshop:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=WORKSHOP_NOT_FOUND,
+            detail="Workshop not found",
         )
     
     return workshop
@@ -173,7 +154,7 @@ def update_workshop(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ID,
+            detail="Invalid workshop ID",
         )
     
     _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
@@ -195,7 +176,7 @@ def update_workshop(
     if not workshop:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=WORKSHOP_NOT_FOUND,
+            detail="Workshop not found",
         )
     
     return workshop
@@ -213,7 +194,7 @@ def get_workshop_members(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ID,
+            detail="Invalid workshop ID",
         )
     
     _ensure_workshop_member(db, current_user.id, workshop_uuid)
@@ -254,7 +235,7 @@ def get_my_workshop_role(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ID,
+            detail="Invalid workshop ID",
         )
     
     # Get user's membership - any member can see their own role
@@ -263,13 +244,13 @@ def get_my_workshop_role(
     if not membership:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=WORKSHOP_NOT_MEMBER,
+            detail="You are not a member of this workshop",
         )
     
     if not membership.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=WORKSHOP_MEMBERSHIP_INACTIVE,
+            detail="Your membership in this workshop is inactive",
         )
     
     return {
@@ -295,7 +276,7 @@ def update_member_role(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_WORKSHOP_OR_USER_ID,
+            detail="Invalid workshop ID or user ID",
         )
     
     _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
@@ -304,7 +285,7 @@ def update_member_role(
     if not new_role or new_role not in ["owner", "admin", "technician", "member", "viewer"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ROLE,
+            detail="Invalid role. Must be: owner, admin, technician, member, or viewer",
         )
     
     # Prevent changing owner role
@@ -312,14 +293,14 @@ def update_member_role(
     if membership and membership.role == "owner" and new_role != "owner":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_CANNOT_CHANGE_OWNER,
+            detail="Cannot change owner role",
         )
     
     updated = WorkshopMemberCRUD.update_role(db, workshop_uuid, user_uuid, new_role, current_user.id)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=WORKSHOP_MEMBER_NOT_FOUND,
+            detail="Member not found",
         )
     
     return updated
@@ -338,7 +319,7 @@ def add_member(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ID,
+            detail="Invalid workshop ID",
         )
     
     _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
@@ -350,7 +331,7 @@ def add_member(
     if role not in ["owner", "admin", "technician", "member", "viewer"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ROLE,
+            detail="Invalid role. Must be: owner, admin, technician, member, or viewer",
         )
     
     # Find user by email or user_id
@@ -368,7 +349,7 @@ def add_member(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=WORKSHOP_USER_NOT_FOUND,
+            detail="User not found",
         )
     
     # Check if user is already a member
@@ -376,7 +357,7 @@ def add_member(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=WORKSHOP_USER_ALREADY_MEMBER,
+            detail="User is already a member of this workshop",
         )
     
     # Add member
@@ -420,7 +401,7 @@ def remove_member(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_WORKSHOP_OR_USER_ID,
+            detail="Invalid workshop ID or user ID",
         )
     
     _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
@@ -430,21 +411,21 @@ def remove_member(
     if membership and membership.role == "owner":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_CANNOT_REMOVE_OWNER,
+            detail="Cannot remove workshop owner",
         )
     
     # Prevent removing yourself
     if user_uuid == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_CANNOT_REMOVE_SELF,
+            detail="Cannot remove yourself from the workshop",
         )
     
     success = WorkshopMemberCRUD.remove_member(db, workshop_uuid, user_uuid, current_user.id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=WORKSHOP_MEMBER_NOT_FOUND,
+            detail="Member not found",
         )
     
     return {"message": "Member removed successfully"}
@@ -463,7 +444,7 @@ def update_workshop_customization(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ID,
+            detail="Invalid workshop ID",
         )
     
     _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
@@ -476,7 +457,7 @@ def update_workshop_customization(
         if len(color) != 6:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=WORKSHOP_INVALID_COLOR,
+                detail="Primary color must be a valid hex color (e.g., #1A56DB)",
             )
     
     # Update customization fields
@@ -498,7 +479,7 @@ def update_workshop_customization(
     if not workshop:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=WORKSHOP_NOT_FOUND,
+            detail="Workshop not found",
         )
     
     return workshop
@@ -516,7 +497,7 @@ def delete_workshop(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=WORKSHOP_INVALID_ID,
+            detail="Invalid workshop ID",
         )
     
     # Only owner can delete workshop
@@ -525,7 +506,7 @@ def delete_workshop(
     if membership.role != "owner":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=WORKSHOP_ONLY_OWNER_DELETE,
+            detail="Only workshop owner can delete the workshop",
         )
     
     # Soft delete the workshop
@@ -533,7 +514,7 @@ def delete_workshop(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=WORKSHOP_NOT_FOUND,
+            detail="Workshop not found",
         )
     
     return None

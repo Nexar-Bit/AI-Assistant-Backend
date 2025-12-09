@@ -5,12 +5,6 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
 from app.core.database import get_db
-from app.core.messages import (
-    VEHICLE_INVALID_LICENSE_PLATE,
-    VEHICLE_INVALID_WORKSHOP_ID,
-    VEHICLE_ALREADY_EXISTS,
-    ERROR_NOT_FOUND,
-)
 from app.models.user import User
 from app.models.vehicle import Vehicle
 
@@ -23,7 +17,7 @@ def _validate_license_plate(plate: str) -> str:
     if not plate or len(plate) > 20:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=VEHICLE_INVALID_LICENSE_PLATE,
+            detail="Invalid license plate format",
         )
     return plate
 
@@ -74,7 +68,7 @@ def register_vehicle(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=VEHICLE_INVALID_WORKSHOP_ID,
+            detail="Invalid workshop_id",
         )
     
     # Require technician or higher role to create vehicles
@@ -86,7 +80,7 @@ def register_vehicle(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=VEHICLE_ALREADY_EXISTS,
+            detail="Vehicle with this license plate already exists",
         )
 
     vehicle = Vehicle(
@@ -134,7 +128,7 @@ def get_vehicle(
         .first()
     )
     if not vehicle:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     return vehicle
 
 
@@ -157,7 +151,7 @@ def update_vehicle(
         .first()
     )
     if not vehicle:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     
     # Require technician or higher role to update vehicles
     if vehicle.workshop_id:
@@ -173,7 +167,7 @@ def update_vehicle(
         if conflict:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=VEHICLE_ALREADY_EXISTS,
+                detail="Vehicle with this license plate already exists",
             )
         vehicle.license_plate = plate
 
@@ -205,7 +199,7 @@ def delete_vehicle(
         .first()
     )
     if not vehicle:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     # Require technician or higher role to delete vehicles
     if vehicle.workshop_id:
