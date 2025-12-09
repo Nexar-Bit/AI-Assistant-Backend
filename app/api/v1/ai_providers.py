@@ -11,7 +11,7 @@ from app.api.dependencies import get_current_user, require_superuser
 from app.core.database import get_db
 from app.models.user import User
 from app.models.ai_provider import AIProvider, AIProviderType, WorkshopAIProvider
-from app.workshops import Workshop
+from app.workshops.models import Workshop
 
 
 router = APIRouter(prefix="/ai-providers", tags=["ai-providers"])
@@ -266,7 +266,7 @@ def assign_provider_to_workshop(
     # Check if user is admin of workshop or superuser
     if current_user.role != "admin":
         # Check workshop membership
-        from app.workshops import WorkshopMember
+        from app.workshops.models import WorkshopMember
         membership = db.query(WorkshopMember).filter(
             WorkshopMember.workshop_id == workshop_id,
             WorkshopMember.user_id == current_user.id,
@@ -387,7 +387,7 @@ def remove_provider_from_workshop(
     """Remove AI provider from workshop (workshop admin or superuser)."""
     # Check permissions
     if current_user.role != "admin":
-        from app.workshops import WorkshopMember
+        from app.workshops.models import WorkshopMember
         membership = db.query(WorkshopMember).filter(
             WorkshopMember.workshop_id == workshop_id,
             WorkshopMember.user_id == current_user.id,

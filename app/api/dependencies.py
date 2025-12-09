@@ -66,6 +66,16 @@ def require_roles(allowed_roles: List[str]) -> Callable[[User], User]:
     return dependency
 
 
+def require_superuser(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Dependency to require superuser (admin) role."""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only superusers can perform this action",
+        )
+    return current_user
+
+
 def get_refresh_token_from_cookie(
     request: Request,
     refresh_token: str | None = Cookie(default=None, alias="refresh_token"),
