@@ -1,0 +1,318 @@
+"""User management endpoints for platform administrators."""
+
+import uuid
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.api.dependencies import get_current_user, require_superuser
+from app.core.security import get_password_hash
+from app.models.user import User
+from app.workshops.models import WorkshopMember
+
+router = APIRouter(prefix="/admin/users", tags=["admin-users"])
+
+
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    password: str = Field(..., min_length=12)
+    role: str = Field(default="technician", pattern="^(admin|technician|viewer)$")
+    is_active: bool = Field(default=True)
+    email_verified: bool = Field(default=True)  # Admin-created users are pre-verified
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = Field(None, min_length=3, max_length=50)
+    email: Optional[EmailStr] = None
+    role: Optional[str] = Field(None, pattern="^(admin|technician|viewer)$")
+    is_active: Optional[bool] = None
+    daily_token_limit: Optional[int] = Field(None, ge=0)
+
+
+class UserPasswordReset(BaseModel):
+    new_password: str = Field(..., min_length=12)
+
+
+class UserResponse(BaseModel):
+    id: str
+    username: str
+    email: str
+    role: str
+    is_active: bool
+    email_verified: bool
+    daily_token_limit: int
+    last_login: Optional[str]
+    created_at: str
+    updated_at: str
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/", response_model=List[UserResponse])
+def list_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+):
+    """List all users (platform admin only)."""
+    query = db.query(User).filter(User.is_deleted == False)
+    
+    if role:
+        query = query.filter(User.role == role)
+    if is_active is not None:
+        query = query.filter(User.is_active == is_active)
+    
+    users = query.order_by(User.created_at.desc()).all()
+    return users
+
+
+@router.get("/{user_id}", response_model=UserResponse)
+def get_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Get a specific user by ID (platform admin only)."""
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        )
+    
+    user = db.query(User).filter(
+        User.id == user_uuid,
+        User.is_deleted == False
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    return user
+
+
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def create_user(
+    user_data: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Create a new user (platform admin only)."""
+    # Check if user already exists
+    existing = db.query(User).filter(
+        (User.username == user_data.username) | (User.email == user_data.email)
+    ).first()
+    
+    if existing:
+        if existing.username == user_data.username:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already exists",
+            )
+        if existing.email == user_data.email:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already exists",
+            )
+    
+    # Hash password
+    try:
+        password_hash = get_password_hash(user_data.password)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    
+    # Create user
+    user = User(
+        id=uuid.uuid4(),
+        username=user_data.username,
+        email=user_data.email,
+        password_hash=password_hash,
+        role=user_data.role,
+        is_active=user_data.is_active,
+        email_verified=user_data.email_verified,
+        registration_approved=True,  # Admin-created users are auto-approved
+        created_by=str(current_user.id),
+    )
+    
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+
+@router.put("/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: str,
+    user_data: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Update a user (platform admin only)."""
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        )
+    
+    user = db.query(User).filter(
+        User.id == user_uuid,
+        User.is_deleted == False
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    # Prevent changing own role or deactivating self
+    if user.id == current_user.id:
+        if user_data.role is not None and user_data.role != user.role:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change your own role",
+            )
+        if user_data.is_active is False:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot deactivate yourself",
+            )
+    
+    # Check for conflicts if updating username or email
+    if user_data.username and user_data.username != user.username:
+        existing = db.query(User).filter(User.username == user_data.username).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already exists",
+            )
+    
+    if user_data.email and user_data.email != user.email:
+        existing = db.query(User).filter(User.email == user_data.email).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already exists",
+            )
+    
+    # Update fields
+    if user_data.username is not None:
+        user.username = user_data.username
+    if user_data.email is not None:
+        user.email = user_data.email
+    if user_data.role is not None:
+        user.role = user_data.role
+    if user_data.is_active is not None:
+        user.is_active = user_data.is_active
+    if user_data.daily_token_limit is not None:
+        user.daily_token_limit = user_data.daily_token_limit
+    
+    user.updated_by = str(current_user.id)
+    
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+
+@router.post("/{user_id}/reset-password", status_code=status.HTTP_200_OK)
+def reset_user_password(
+    user_id: str,
+    password_data: UserPasswordReset,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Reset a user's password (platform admin only)."""
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        )
+    
+    user = db.query(User).filter(
+        User.id == user_uuid,
+        User.is_deleted == False
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    # Hash new password
+    try:
+        password_hash = get_password_hash(password_data.new_password)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    
+    user.password_hash = password_hash
+    user.updated_by = str(current_user.id)
+    
+    db.commit()
+    
+    return {"message": "Password reset successfully", "user_id": str(user.id)}
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Delete a user (soft delete, platform admin only)."""
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        )
+    
+    # Prevent deleting self
+    if user_uuid == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete yourself",
+        )
+    
+    user = db.query(User).filter(
+        User.id == user_uuid,
+        User.is_deleted == False
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    # Soft delete
+    user.is_deleted = True
+    user.deleted_by = str(current_user.id)
+    
+    # Also deactivate
+    user.is_active = False
+    
+    db.commit()
+

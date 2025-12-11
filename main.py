@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.v1 import admin, auth, chat, chat_websocket, consultations, reports, tokens, upload, users, vehicles, workshops, ai_providers, registration_admin
+from app.api.v1 import admin, auth, chat, chat_websocket, consultations, reports, tokens, upload, users, vehicles, workshops, ai_providers, registration_admin, prompts, admin_users, admin_workshops
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.middleware.logging import LoggingMiddleware
@@ -138,6 +138,9 @@ def create_app() -> FastAPI:
     app.include_router(reports.router, prefix=prefix)
     app.include_router(ai_providers.router, prefix=prefix)
     app.include_router(registration_admin.router, prefix=prefix)
+    app.include_router(prompts.router, prefix=prefix)
+    app.include_router(admin_users.router, prefix=prefix)
+    app.include_router(admin_workshops.router, prefix=prefix)
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict:

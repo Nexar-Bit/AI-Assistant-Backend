@@ -90,6 +90,12 @@ async def chat_websocket(
             db.close()
             return  # Connection already closed
         
+        # Platform administrators (global admin role) cannot use chat
+        if user.role == "admin":
+            await websocket.close(code=1008, reason="Platform administrators cannot use chat")
+            db.close()
+            return
+        
         try:
             thread_uuid = uuid.UUID(thread_id)
         except ValueError:
@@ -207,7 +213,7 @@ async def chat_websocket(
                 )
                 
                 # Build AI context
-                formatted_messages = context_builder.build_context(thread, existing_messages + [user_message])
+                formatted_messages = context_builder.build_context(thread, existing_messages + [user_message], db)
                 chat_messages = [
                     ChatMsg(role=msg["role"], content=msg["content"])
                     for msg in formatted_messages[1:]  # Skip system message

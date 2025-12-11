@@ -5,6 +5,8 @@ from typing import Any, Dict, List
 
 from .models import ChatThread, ChatMessage
 from app.services.openai_service import OpenAIProvider
+from app.services.prompt_service import build_system_prompt
+from sqlalchemy.orm import Session
 
 
 logger = logging.getLogger("app.chat.context")
@@ -30,7 +32,11 @@ class ChatContextBuilder:
         return self.openai_provider._estimate_tokens(model, text)
 
     def build_context(
-        self, thread: ChatThread, messages: List[ChatMessage], model: str = "gpt-4o-mini"
+        self, 
+        thread: ChatThread, 
+        messages: List[ChatMessage], 
+        db: Session,
+        model: str = "gpt-4o-mini"
     ) -> List[Dict[str, Any]]:
         """
         Builds the full AI context for a chat completion request.
@@ -38,6 +44,7 @@ class ChatContextBuilder:
         Args:
             thread: The ChatThread object containing vehicle context.
             messages: A list of ChatMessage objects in chronological order.
+            db: Database session for fetching prompts.
             model: The AI model to use for token estimation.
         
         Returns:
@@ -45,25 +52,14 @@ class ChatContextBuilder:
         """
         formatted_messages: List[Dict[str, Any]] = []
 
-        # 1. System Prompt
-        system_content = (
-            "You are an expert automotive diagnostic assistant for professional technicians. "
-            "Provide clear, concise, and actionable diagnostic steps and repair advice. "
-            "Always prioritize safety and best practices. "
-            "If specific vehicle details are provided, use them to tailor your response."
+        # 1. System Prompt - Use prompt service to get global/workshop prompts
+        system_content = build_system_prompt(
+            db=db,
+            workshop_id=str(thread.workshop_id),
+            vehicle_context=thread.vehicle_context,
+            error_codes=thread.error_codes,
+            vehicle_km=thread.vehicle_km
         )
-        
-        # Add vehicle context if available
-        if thread.vehicle_context:
-            system_content += f"\n\nVehicle Context:\n{thread.vehicle_context}"
-        
-        # Add error codes if available
-        if thread.error_codes:
-            system_content += f"\n\nReported Error Codes (DTCs): {thread.error_codes}"
-        
-        # Add current KM if available
-        if thread.vehicle_km is not None:
-            system_content += f"\n\nCurrent Odometer: {thread.vehicle_km} KM"
 
         formatted_messages.append({"role": "system", "content": system_content})
 

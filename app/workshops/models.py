@@ -41,6 +41,9 @@ class Workshop(TimestampedUUIDModel):
     vehicle_templates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # Default vehicle templates
     quick_replies: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # Workshop-specific quick replies
     diagnostic_code_library: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # Custom diagnostic codes
+    
+    # AI Prompt (workshop-specific, set by workshop admins)
+    workshop_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)  # Workshop-specific AI prompt
 
 
 class WorkshopMember(TimestampedUUIDModel):

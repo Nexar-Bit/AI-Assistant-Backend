@@ -117,6 +117,13 @@ async def create_thread(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new chat thread for a vehicle consultation."""
+    # Platform administrators (global admin role) cannot create chat threads
+    if current_user.role == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform administrators cannot create chat threads. This feature is for technicians and workshop members only.",
+        )
+    
     workshop_id_str = payload.get("workshop_id")
     license_plate = payload.get("license_plate")
     vehicle_km = payload.get("vehicle_km")
@@ -397,6 +404,13 @@ async def send_message(
     current_user: User = Depends(get_current_user),
 ):
     """Send a message in a chat thread and get AI response."""
+    # Platform administrators (global admin role) cannot use chat - they are management only
+    if current_user.role == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform administrators cannot use chat. This feature is for technicians and workshop members only.",
+        )
+    
     content = payload.get("content")
     if not content:
         raise HTTPException(
@@ -494,7 +508,7 @@ async def send_message(
     
     # Use ChatContextBuilder to build conversation history
     context_builder = ChatContextBuilder()
-    formatted_messages = context_builder.build_context(thread, existing_messages + [user_message])
+    formatted_messages = context_builder.build_context(thread, existing_messages + [user_message], db)
     
     # Convert to ChatRequest format
     chat_messages = [
