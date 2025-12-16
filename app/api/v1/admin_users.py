@@ -45,6 +45,7 @@ class UserResponse(BaseModel):
     is_active: bool
     email_verified: bool
     registration_approved: bool
+    daily_token_limit: int
     created_at: datetime
     updated_at: datetime
 

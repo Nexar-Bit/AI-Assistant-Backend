@@ -1,4 +1,5 @@
 from datetime import timedelta, datetime, timezone
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -54,6 +55,7 @@ from app.workshops.crud import WorkshopCRUD
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger("app.auth")
 
 
 # Pydantic models for registration
@@ -70,7 +72,8 @@ class RegisterRequest(BaseModel):
             raise ValueError("Username must be at least 3 characters long")
         if len(v) > 50:
             raise ValueError("Username must be less than 50 characters")
-        if not v.isalnum() and "_" not in v and "-" not in v:
+        # Check if username contains only allowed characters
+        if not all(c.isalnum() or c in ('_', '-') for c in v):
             raise ValueError("Username can only contain letters, numbers, underscores, and hyphens")
         return v
 
@@ -225,9 +228,6 @@ def refresh_token(
     refresh_token: str = Depends(get_refresh_token_from_cookie),
     db: Session = Depends(get_db),
 ):
-    import logging
-    logger = logging.getLogger("app.auth")
-    
     # Log cookie presence for debugging
     cookies = request.cookies
     logger.debug(f"Refresh endpoint called. Cookies present: {list(cookies.keys())}")
@@ -392,26 +392,29 @@ def register(
     db.refresh(user)
     
     # Send verification email
-    if email_service.is_available():
-        email_sent = email_service.send_verification_email(
-            to_email=register_data.email,
-            verification_token=verification_token,
-            username=register_data.username,
-        )
-        if not email_sent:
-            logger.warning("Failed to send verification email to %s", register_data.email)
-        
-        # Notify admin if manual approval is required
-        if not auto_approve and settings.ADMIN_NOTIFICATION_EMAIL:
-            email_service.send_registration_notification(
-                to_email=settings.ADMIN_NOTIFICATION_EMAIL,
+    try:
+        if email_service.is_available():
+            email_sent = email_service.send_verification_email(
+                to_email=register_data.email,
+                verification_token=verification_token,
                 username=register_data.username,
-                email=register_data.email,
-                message=register_data.registration_message,
-                user_id=str(user.id),
             )
-    else:
-        logger.warning("Email service not configured. Verification email not sent to %s", register_data.email)
+            if not email_sent:
+                logger.warning("Failed to send verification email to %s", register_data.email)
+            
+            # Notify admin if manual approval is required
+            if not auto_approve and settings.ADMIN_NOTIFICATION_EMAIL:
+                email_service.send_registration_notification(
+                    to_email=settings.ADMIN_NOTIFICATION_EMAIL,
+                    username=register_data.username,
+                    email=register_data.email,
+                    message=register_data.registration_message,
+                    user_id=str(user.id),
+                )
+        else:
+            logger.warning("Email service not configured. Verification email not sent to %s", register_data.email)
+    except Exception as e:
+        logger.error(f"Error sending verification email: {str(e)}", exc_info=True)
     
     # Log registration event
     log_auth_event(
