@@ -1,10 +1,10 @@
 """Workshop management endpoints for platform administrators."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -23,15 +23,15 @@ class WorkshopUpdate(BaseModel):
 
 
 class WorkshopResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     name: str
     slug: str
     description: Optional[str]
     owner_id: str
     monthly_token_limit: int
     tokens_used_this_month: int
-    token_reset_date: Optional[str]
-    token_allocation_date: Optional[str]
+    token_reset_date: Optional[date]
+    token_allocation_date: Optional[date]
     token_reset_day: int
     is_active: bool
     allow_auto_invites: bool
@@ -41,11 +41,20 @@ class WorkshopResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_serializer('id')
+    def serialize_id(self, value: uuid.UUID) -> str:
+        return str(value)
+
+    @field_serializer('token_reset_date', 'token_allocation_date')
+    def serialize_date(self, value: Optional[date]) -> Optional[str]:
+        return value.isoformat() if value else None
+
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat() if value else None
+
     class Config:
         from_attributes = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None,
-        }
 
 
 @router.get("/", response_model=List[WorkshopResponse])

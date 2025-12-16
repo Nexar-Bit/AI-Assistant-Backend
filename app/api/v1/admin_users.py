@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_serializer
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -38,7 +38,7 @@ class UserPasswordReset(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     username: str
     email: str
     role: str
@@ -48,11 +48,16 @@ class UserResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_serializer('id')
+    def serialize_id(self, value: uuid.UUID) -> str:
+        return str(value)
+
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat() if value else None
+
     class Config:
         from_attributes = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None,
-        }
 
 
 @router.get("/", response_model=List[UserResponse])
