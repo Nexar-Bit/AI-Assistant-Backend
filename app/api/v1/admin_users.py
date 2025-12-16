@@ -11,7 +11,8 @@ from app.core.database import get_db
 from app.api.dependencies import get_current_user, require_superuser
 from app.core.security import get_password_hash
 from app.models.user import User
-from app.workshops.models import WorkshopMember
+from app.workshops.models import WorkshopMember, Workshop
+from app.workshops import WorkshopMemberCRUD
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
@@ -23,6 +24,9 @@ class UserCreate(BaseModel):
     # Global role: owner (super admin), admin, technician, viewer, member
     role: str = Field(default="technician", pattern="^(owner|admin|technician|viewer|member)$")
     is_active: bool = Field(default=True)
+    # Optional: assign to workshop (platform owners can assign to any workshop)
+    workshop_id: Optional[uuid.UUID] = None
+    workshop_role: Optional[str] = Field(None, pattern="^(owner|admin|technician|member|viewer)$")
 
 
 class UserUpdate(BaseModel):
@@ -150,12 +154,48 @@ def create_user(
         password_hash=password_hash,
         role=user_data.role,
         is_active=user_data.is_active,
-        email_verified=user_data.email_verified,
+        email_verified=True,  # Platform admin-created users are auto-verified
         registration_approved=True,  # Admin-created users are auto-approved
         created_by=str(current_user.id),
     )
     
     db.add(user)
+    db.flush()
+    
+    # If workshop_id is provided, assign user to workshop (platform owners can assign to any workshop)
+    if user_data.workshop_id and user_data.workshop_role:
+        # Verify workshop exists
+        workshop = db.query(Workshop).filter(
+            Workshop.id == user_data.workshop_id,
+            Workshop.is_deleted == False
+        ).first()
+        
+        if not workshop:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workshop not found",
+            )
+        
+        # Check if user is already a member
+        existing_membership = WorkshopMemberCRUD.get_membership(db, user_data.workshop_id, user.id)
+        if existing_membership:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User is already a member of this workshop",
+            )
+        
+        # Add user to workshop
+        WorkshopMemberCRUD.add_member(
+            db,
+            workshop_id=user_data.workshop_id,
+            user_id=user.id,
+            role=user_data.workshop_role,
+            invited_by=current_user.id,
+            created_by=current_user.id,
+        )
+    
     db.commit()
     db.refresh(user)
     

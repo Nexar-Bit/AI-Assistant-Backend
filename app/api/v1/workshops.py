@@ -537,7 +537,11 @@ def create_workshop_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a user and assign them to this workshop (workshop admin/owner only)."""
+    """Create a user and assign them to this workshop.
+    
+    - Platform owners (global role 'owner') can create users in ANY workshop
+    - Workshop admins/owners can only create users in THEIR OWN workshop
+    """
     try:
         workshop_uuid = uuid.UUID(workshop_id)
     except ValueError:
@@ -546,8 +550,23 @@ def create_workshop_user(
             detail="Invalid workshop ID",
         )
     
-    # Ensure user is admin or owner of the workshop
-    _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
+    # Verify workshop exists
+    workshop = db.query(Workshop).filter(
+        Workshop.id == workshop_uuid,
+        Workshop.is_deleted == False
+    ).first()
+    
+    if not workshop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workshop not found",
+        )
+    
+    # Platform owners (global role 'owner') can create users in any workshop
+    # Workshop admins/owners can only create users in their own workshop
+    if current_user.role != "owner":
+        # For non-platform-owners, ensure they are admin/owner of this specific workshop
+        _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
     
     # Check if user already exists
     existing = db.query(User).filter(
