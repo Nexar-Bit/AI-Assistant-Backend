@@ -103,9 +103,9 @@ def approve_registration(
         
         # Approve registration
         user.registration_approved = True
-        # Only activate if email is also verified
-        if user.email_verified:
-            user.is_active = True
+        # Activate user (email verification removed)
+        user.is_active = True
+        user.email_verified = True  # Mark as verified automatically
         
         db.commit()
         db.refresh(user)

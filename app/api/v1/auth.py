@@ -22,7 +22,6 @@ from app.core.database import get_db
 from app.core.messages import (
     AUTH_INVALID_CREDENTIALS,
     AUTH_USER_INACTIVE,
-    AUTH_EMAIL_NOT_VERIFIED,
     AUTH_REFRESH_TOKEN_INVALID,
     AUTH_REFRESH_TOKEN_PAYLOAD_INVALID,
     AUTH_REFRESH_TOKEN_REVOKED,
@@ -32,13 +31,6 @@ from app.core.messages import (
     REG_SUCCESS,
     REG_USERNAME_EXISTS,
     REG_EMAIL_EXISTS,
-    EMAIL_VERIFICATION_SUCCESS,
-    EMAIL_VERIFICATION_FAILED,
-    EMAIL_VERIFICATION_EXPIRED,
-    EMAIL_VERIFICATION_ALREADY_VERIFIED,
-    EMAIL_VERIFICATION_RESENT,
-    EMAIL_REQUIRED,
-    EMAIL_ALREADY_VERIFIED,
 )
 from app.core.security import (
     create_access_token,
@@ -140,22 +132,6 @@ def login(
             detail=AUTH_INVALID_CREDENTIALS,
         )
     
-    # Check if email is verified
-    if not user.email_verified:
-        log_auth_event(
-            db,
-            user_id=str(user.id),
-            action_type="AUTH_LOGIN",
-            success=False,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            details={"username": form_data.username, "reason": "email_not_verified"},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=AUTH_EMAIL_NOT_VERIFIED,
-        )
-
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -365,10 +341,6 @@ def register(
             detail=str(e),
         )
     
-    # Generate email verification token
-    verification_token = uuid.uuid4().hex
-    verification_expires = datetime.now(timezone.utc) + timedelta(hours=24)
-    
     # Determine if auto-approval is enabled
     auto_approve = settings.AUTO_APPROVE_REGISTRATION
     
@@ -379,10 +351,10 @@ def register(
         email=register_data.email,
         password_hash=password_hash,
         role="technician",  # Default role
-        is_active=False,  # Inactive until email verified - will be activated by verification
-        email_verified=False,
-        email_verification_token=verification_token,
-        email_verification_expires_at=verification_expires,
+        is_active=False,  # Becomes active after admin approval
+        email_verified=True,  # Email verification disabled globally
+        email_verification_token=None,
+        email_verification_expires_at=None,
         registration_message=register_data.registration_message,
         registration_approved=auto_approve,  # Auto-approve based on config
     )
@@ -391,30 +363,18 @@ def register(
     db.commit()
     db.refresh(user)
     
-    # Send verification email
+    # Notify admin if manual approval is required (email verification removed)
     try:
-        if email_service.is_available():
-            email_sent = email_service.send_verification_email(
-                to_email=register_data.email,
-                verification_token=verification_token,
+        if not auto_approve and email_service.is_available() and settings.ADMIN_NOTIFICATION_EMAIL:
+            email_service.send_registration_notification(
+                to_email=settings.ADMIN_NOTIFICATION_EMAIL,
                 username=register_data.username,
+                email=register_data.email,
+                message=register_data.registration_message,
+                user_id=str(user.id),
             )
-            if not email_sent:
-                logger.warning("Failed to send verification email to %s", register_data.email)
-            
-            # Notify admin if manual approval is required
-            if not auto_approve and settings.ADMIN_NOTIFICATION_EMAIL:
-                email_service.send_registration_notification(
-                    to_email=settings.ADMIN_NOTIFICATION_EMAIL,
-                    username=register_data.username,
-                    email=register_data.email,
-                    message=register_data.registration_message,
-                    user_id=str(user.id),
-                )
-        else:
-            logger.warning("Email service not configured. Verification email not sent to %s", register_data.email)
     except Exception as e:
-        logger.error(f"Error sending verification email: {str(e)}", exc_info=True)
+        logger.error(f"Error sending admin notification email: {str(e)}", exc_info=True)
     
     # Log registration event
     log_auth_event(
@@ -431,111 +391,26 @@ def register(
         "message": REG_SUCCESS if auto_approve else "Registro enviado para aprobación. Recibirás un correo cuando sea aprobado.",
         "user_id": str(user.id),
         "email": user.email,
-        "email_verification_required": True,
+        "email_verification_required": False,  # Email verification disabled
         "requires_approval": not auto_approve,
     }
 
 
 @router.post("/verify-email")
-def verify_email(
-    request: Request,
-    verify_data: VerifyEmailRequest,
-    db: Session = Depends(get_db),
-):
-    """Verify user email address using verification token."""
-    # Find user by verification token
-    user = db.query(User).filter(
-        User.email_verification_token == verify_data.token,
-        User.email_verified == False,
-    ).first()
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=EMAIL_VERIFICATION_FAILED,
-        )
-    
-    # Check if token has expired
-    if user.email_verification_expires_at and user.email_verification_expires_at < datetime.now(timezone.utc):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=EMAIL_VERIFICATION_EXPIRED,
-        )
-    
-    # Verify email and activate account
-    user.email_verified = True
-    user.is_active = True
-    user.email_verification_token = None
-    user.email_verification_expires_at = None
-    
-    db.add(user)
-    db.commit()
-    
-    # Log verification event
-    log_auth_event(
-        db,
-        user_id=str(user.id),
-        action_type="AUTH_EMAIL_VERIFIED",
-        success=True,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        details={},
+def verify_email():
+    """Deprecated endpoint kept for backward compatibility. Email verification is disabled."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Email verification is no longer required in this system.",
     )
-    
-    return {
-        "message": EMAIL_VERIFICATION_SUCCESS,
-        "user_id": str(user.id),
-        "email": user.email,
-    }
 
 
 @router.post("/resend-verification")
-def resend_verification(
-    request: Request,
-    payload: dict,
-    db: Session = Depends(get_db),
-):
-    """Resend email verification link."""
-    email = payload.get("email")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=EMAIL_REQUIRED,
-        )
-    
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        # Don't reveal if email exists or not (security best practice)
-        return {
-            "message": EMAIL_VERIFICATION_RESENT,
-        }
-    
-    if user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=EMAIL_ALREADY_VERIFIED,
-        )
-    
-    # Generate new verification token
-    verification_token = uuid.uuid4().hex
-    verification_expires = datetime.now(timezone.utc) + timedelta(hours=24)
-    
-    user.email_verification_token = verification_token
-    user.email_verification_expires_at = verification_expires
-    
-    db.add(user)
-    db.commit()
-    
-    # Send verification email
-    if email_service.is_available():
-        email_service.send_verification_email(
-            to_email=user.email,
-            verification_token=verification_token,
-            username=user.username,
-        )
-    
-    return {
-        "message": EMAIL_VERIFICATION_RESENT,
-    }
+def resend_verification():
+    """Deprecated endpoint kept for backward compatibility. Email verification is disabled."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Email verification is no longer required in this system.",
+    )
 
 

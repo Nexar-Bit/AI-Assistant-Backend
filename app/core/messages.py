@@ -12,7 +12,6 @@ AUTH_REFRESH_TOKEN_REVOKED = "El token de actualización ha sido rotado o revoca
 AUTH_USER_ID_INVALID = "Formato de ID de usuario inválido"
 AUTH_USER_NOT_FOUND_OR_INACTIVE = "Usuario no encontrado o inactivo"
 AUTH_INSUFFICIENT_PERMISSIONS = "Permisos insuficientes"
-AUTH_EMAIL_NOT_VERIFIED = "Correo electrónico no verificado. Por favor verifica tu correo antes de iniciar sesión."
 AUTH_LOGOUT_SUCCESS = "Sesión cerrada"
 
 # Registration messages
@@ -23,17 +22,7 @@ REG_USERNAME_EXISTS = "El nombre de usuario ya existe"
 REG_EMAIL_EXISTS = "El correo electrónico ya está registrado"
 REG_PASSWORD_TOO_SHORT = "La contraseña debe tener al menos 12 caracteres"
 REG_PASSWORD_COMPLEXITY = "La contraseña debe contener mayúsculas, minúsculas, números y caracteres especiales"
-REG_SUCCESS = "Usuario registrado exitosamente. Por favor verifica tu correo electrónico."
-REG_EMAIL_VERIFICATION_SENT = "Correo de verificación enviado"
-
-# Email verification
-EMAIL_VERIFICATION_SUCCESS = "Correo electrónico verificado exitosamente. Tu cuenta ahora está activa."
-EMAIL_VERIFICATION_FAILED = "Token de verificación inválido o expirado"
-EMAIL_VERIFICATION_EXPIRED = "El token de verificación ha expirado. Por favor solicita uno nuevo."
-EMAIL_VERIFICATION_ALREADY_VERIFIED = "Este correo electrónico ya ha sido verificado"
-EMAIL_VERIFICATION_RESENT = "Si existe una cuenta con este correo, se ha enviado un enlace de verificación."
-EMAIL_REQUIRED = "El correo electrónico es requerido"
-EMAIL_ALREADY_VERIFIED = "El correo electrónico ya está verificado"
+REG_SUCCESS = "Usuario registrado exitosamente."
 
 # Workshop messages
 WORKSHOP_NOT_FOUND = "Taller no encontrado"
