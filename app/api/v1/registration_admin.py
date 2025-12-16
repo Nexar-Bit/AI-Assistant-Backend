@@ -12,6 +12,7 @@ from app.api.dependencies import get_current_user, require_superuser
 from app.core.database import get_db
 from app.models.user import User
 from app.services.email_service import email_service
+from app.workshops.crud import WorkshopCRUD, WorkshopMemberCRUD
 
 
 router = APIRouter(prefix="/admin/registrations", tags=["admin", "registrations"])
@@ -44,6 +45,8 @@ class RegistrationResponse(BaseModel):
 class ApproveRegistrationRequest(BaseModel):
     """Schema for approving a registration."""
     approved: bool
+    workshop_id: Optional[uuid.UUID] = None  # Workshop to assign user to
+    workshop_role: Optional[str] = None  # Role in the workshop (owner, admin, technician, viewer, member)
 
 
 @router.get("/pending", response_model=List[RegistrationResponse])
@@ -67,7 +70,7 @@ def approve_registration(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superuser),
 ):
-    """Approve or reject a user registration (superuser only)."""
+    """Approve or reject a user registration with workshop assignment (superuser only)."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
@@ -76,29 +79,85 @@ def approve_registration(
         )
     
     if payload.approved:
+        # Validate workshop assignment if provided
+        if payload.workshop_id and not payload.workshop_role:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workshop role is required when assigning to a workshop",
+            )
+        
+        # Validate workshop exists
+        if payload.workshop_id:
+            workshop = WorkshopCRUD.get_by_id(db, payload.workshop_id)
+            if not workshop:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workshop not found",
+                )
+            
+            if not workshop.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot assign user to inactive workshop",
+                )
+        
+        # Approve registration
         user.registration_approved = True
         # Only activate if email is also verified
         if user.email_verified:
             user.is_active = True
         
-        # Send approval email
-        if email_service.is_available():
-            email_service.send_approval_email(
-                to_email=user.email,
-                username=user.username,
-                approved=True,
-            )
-        
         db.commit()
-        return {"message": "Registro aprobado exitosamente", "user_id": str(user.id)}
+        db.refresh(user)
+        
+        # Add user to workshop if specified
+        if payload.workshop_id and payload.workshop_role:
+            try:
+                WorkshopMemberCRUD.add_member(
+                    db=db,
+                    workshop_id=payload.workshop_id,
+                    user_id=user.id,
+                    role=payload.workshop_role,
+                    invited_by=current_user.id,
+                    created_by=current_user.id,
+                )
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"User approved but failed to add to workshop: {str(e)}",
+                )
+        
+        # Send approval email
+        try:
+            if email_service.is_available():
+                email_service.send_approval_email(
+                    to_email=user.email,
+                    username=user.username,
+                    approved=True,
+                )
+        except Exception as e:
+            # Don't fail the request if email fails
+            pass
+        
+        return {
+            "message": "Registro aprobado exitosamente",
+            "user_id": str(user.id),
+            "workshop_assigned": payload.workshop_id is not None,
+            "workshop_id": str(payload.workshop_id) if payload.workshop_id else None,
+        }
     else:
         # Reject registration
-        if email_service.is_available():
-            email_service.send_approval_email(
-                to_email=user.email,
-                username=user.username,
-                approved=False,
-            )
+        try:
+            if email_service.is_available():
+                email_service.send_approval_email(
+                    to_email=user.email,
+                    username=user.username,
+                    approved=False,
+                )
+        except Exception:
+            pass
         
         # Optionally delete the user or mark as rejected
         db.delete(user)
