@@ -1,6 +1,7 @@
 """Workshop management endpoints for platform administrators."""
 
 import uuid
+from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -29,12 +30,22 @@ class WorkshopResponse(BaseModel):
     owner_id: str
     monthly_token_limit: int
     tokens_used_this_month: int
+    token_reset_date: Optional[str]
+    token_allocation_date: Optional[str]
+    token_reset_day: int
     is_active: bool
-    created_at: str
-    updated_at: str
+    allow_auto_invites: bool
+    logo_url: Optional[str]
+    primary_color: Optional[str]
+    workshop_prompt: Optional[str]
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None,
+        }
 
 
 @router.get("/", response_model=List[WorkshopResponse])
@@ -231,4 +242,73 @@ def delete_workshop(
     workshop.is_active = False
     
     db.commit()
+
+
+@router.post("/{workshop_id}/toggle-active", response_model=WorkshopResponse)
+def toggle_workshop_active(
+    workshop_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Toggle workshop active status (platform admin only)."""
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop ID",
+        )
+    
+    workshop = db.query(Workshop).filter(
+        Workshop.id == workshop_uuid,
+        Workshop.is_deleted == False
+    ).first()
+    
+    if not workshop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workshop not found",
+        )
+    
+    # Toggle active status
+    workshop.is_active = not workshop.is_active
+    workshop.updated_by = str(current_user.id)
+    db.commit()
+    db.refresh(workshop)
+    return workshop
+
+
+@router.post("/{workshop_id}/set-token-limit", response_model=WorkshopResponse)
+def set_token_limit(
+    workshop_id: str,
+    new_limit: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Set workshop monthly token limit (platform admin only)."""
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop ID",
+        )
+    
+    workshop = db.query(Workshop).filter(
+        Workshop.id == workshop_uuid,
+        Workshop.is_deleted == False
+    ).first()
+    
+    if not workshop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workshop not found",
+        )
+    
+    # Update token limit
+    workshop.monthly_token_limit = new_limit
+    workshop.updated_by = str(current_user.id)
+    db.commit()
+    db.refresh(workshop)
+    return workshop
 

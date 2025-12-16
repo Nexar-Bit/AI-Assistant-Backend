@@ -189,18 +189,20 @@ def login(
         details={},
     )
 
-    # Get user's workshops for multi-tenant support
-    workshops = WorkshopCRUD.get_user_workshops(db, user.id)
-    workshops_data = [
-        {
-            "id": str(w.id),
-            "name": w.name,
-            "slug": w.slug,
-            "description": w.description,
-            "role": "owner" if str(w.owner_id) == str(user.id) else "member",  # Simplified
-        }
-        for w in workshops
-    ]
+    # Get user's workshops for multi-tenant support (skip for platform admins)
+    workshops_data = []
+    if user.role != "admin":
+        workshops = WorkshopCRUD.get_user_workshops(db, user.id)
+        workshops_data = [
+            {
+                "id": str(w.id),
+                "name": w.name,
+                "slug": w.slug,
+                "description": w.description,
+                "role": "owner" if str(w.owner_id) == str(user.id) else "member",  # Simplified
+            }
+            for w in workshops
+        ]
 
     return {
         "access_token": access_token,
@@ -377,7 +379,7 @@ def register(
         email=register_data.email,
         password_hash=password_hash,
         role="technician",  # Default role
-        is_active=False,  # Inactive until email verified and approved
+        is_active=False,  # Inactive until email verified - will be activated by verification
         email_verified=False,
         email_verification_token=verification_token,
         email_verification_expires_at=verification_expires,

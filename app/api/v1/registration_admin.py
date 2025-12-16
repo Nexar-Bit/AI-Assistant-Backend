@@ -45,7 +45,7 @@ def list_pending_registrations(
     """List all pending user registrations (superuser only)."""
     users = db.query(User).filter(
         User.registration_approved == False,
-        User.is_active == False,
+        User.is_deleted == False,
     ).order_by(User.created_at.desc()).all()
     
     return [

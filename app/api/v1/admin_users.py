@@ -1,6 +1,7 @@
 """User management endpoints for platform administrators."""
 
 import uuid
+from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
@@ -43,13 +44,15 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     email_verified: bool
-    daily_token_limit: int
-    last_login: Optional[str]
-    created_at: str
-    updated_at: str
+    registration_approved: bool
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None,
+        }
 
 
 @router.get("/", response_model=List[UserResponse])
@@ -315,4 +318,38 @@ def delete_user(
     user.is_active = False
     
     db.commit()
+
+
+@router.post("/{user_id}/toggle-active", response_model=UserResponse)
+def toggle_user_active(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Toggle user active status (platform admin only)."""
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        )
+    
+    user = db.query(User).filter(
+        User.id == user_uuid,
+        User.is_deleted == False
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    # Toggle active status
+    user.is_active = not user.is_active
+    user.updated_by = str(current_user.id)
+    db.commit()
+    db.refresh(user)
+    return user
 
