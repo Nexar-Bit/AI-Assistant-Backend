@@ -13,6 +13,7 @@ from app.core.security import get_password_hash
 from app.models.user import User
 from app.workshops.models import WorkshopMember, Workshop
 from app.workshops import WorkshopMemberCRUD
+from sqlalchemy import and_
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
@@ -265,8 +266,35 @@ def update_user(
         user.username = user_data.username
     if user_data.email is not None:
         user.email = user_data.email
+    
+    # Update role in users table AND synchronize with workshop_members table
     if user_data.role is not None:
+        old_role = user.role
         user.role = user_data.role
+        
+        # Also update workshop_members.role for all active workshops where this user is a member
+        # This keeps both tables synchronized when changing roles from admin panel
+        memberships = db.query(WorkshopMember).filter(
+            and_(
+                WorkshopMember.user_id == user_uuid,
+                WorkshopMember.is_deleted == False,
+                WorkshopMember.is_active == True
+            )
+        ).all()
+        
+        for membership in memberships:
+            # Sync workshop role to match the new global role
+            # Exception: If new global role is "owner", preserve existing workshop role
+            # (platform owners can have different roles in different workshops)
+            if user_data.role == "owner":
+                # Platform owners can have any workshop role, don't change it
+                pass
+            else:
+                # For all other roles, sync workshop_members.role to match users.role
+                membership.role = user_data.role
+                membership.updated_by = str(current_user.id)
+                db.add(membership)
+    
     if user_data.is_active is not None:
         user.is_active = user_data.is_active
     if user_data.daily_token_limit is not None:
