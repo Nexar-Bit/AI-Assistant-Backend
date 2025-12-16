@@ -163,6 +163,7 @@ def create_user(
 
 
 @router.put("/{user_id}", response_model=UserResponse)
+@router.patch("/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: str,
     user_data: UserUpdate,

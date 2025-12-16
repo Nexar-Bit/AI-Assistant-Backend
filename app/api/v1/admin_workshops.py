@@ -103,6 +103,7 @@ def get_workshop(
 
 
 @router.put("/{workshop_id}", response_model=WorkshopResponse)
+@router.patch("/{workshop_id}", response_model=WorkshopResponse)
 def update_workshop(
     workshop_id: str,
     workshop_data: WorkshopUpdate,
