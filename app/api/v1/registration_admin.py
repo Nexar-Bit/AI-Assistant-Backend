@@ -1,10 +1,11 @@
 """Admin endpoints for managing user registrations."""
 
 import uuid
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, require_superuser
@@ -26,7 +27,15 @@ class RegistrationResponse(BaseModel):
     email_verified: bool
     is_active: bool
     role: str
-    created_at: str
+    created_at: datetime
+
+    @field_serializer('id')
+    def serialize_id(self, value: uuid.UUID) -> str:
+        return str(value)
+
+    @field_serializer('created_at')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat() if value else None
 
     class Config:
         from_attributes = True
@@ -48,20 +57,7 @@ def list_pending_registrations(
         User.is_deleted == False,
     ).order_by(User.created_at.desc()).all()
     
-    return [
-        RegistrationResponse(
-            id=u.id,
-            username=u.username,
-            email=u.email,
-            registration_message=u.registration_message,
-            registration_approved=u.registration_approved,
-            email_verified=u.email_verified,
-            is_active=u.is_active,
-            role=u.role,
-            created_at=u.created_at.isoformat(),
-        )
-        for u in users
-    ]
+    return users
 
 
 @router.post("/{user_id}/approve", status_code=status.HTTP_200_OK)
@@ -125,18 +121,5 @@ def list_all_registrations(
     
     users = query.order_by(User.created_at.desc()).limit(limit).all()
     
-    return [
-        RegistrationResponse(
-            id=u.id,
-            username=u.username,
-            email=u.email,
-            registration_message=u.registration_message,
-            registration_approved=u.registration_approved,
-            email_verified=u.email_verified,
-            is_active=u.is_active,
-            role=u.role,
-            created_at=u.created_at.isoformat(),
-        )
-        for u in users
-    ]
+    return users
 
