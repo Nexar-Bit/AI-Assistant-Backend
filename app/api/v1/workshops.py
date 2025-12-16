@@ -6,12 +6,14 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_superuser
 from app.core.database import get_db
+from app.core.security import get_password_hash
 from app.models.user import User
 from app.workshops import Workshop, WorkshopMember, WorkshopCRUD, WorkshopMemberCRUD
 from app.workshops.middleware import require_workshop_membership
 from app.workshops.schemas import WorkshopCustomizationUpdate
+from pydantic import BaseModel, EmailStr, Field
 
 
 router = APIRouter(prefix="/workshops", tags=["workshops"])
@@ -79,9 +81,9 @@ def list_workshops(
 def create_workshop(
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_superuser),
 ):
-    """Create a new workshop (user becomes owner)."""
+    """Create a new workshop (platform administrators only)."""
     name = payload.get("name")
     slug = payload.get("slug") or name.lower().replace(" ", "-")[:50]
     description = payload.get("description")
@@ -518,4 +520,97 @@ def delete_workshop(
         )
     
     return None
+
+
+class WorkshopUserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    password: str = Field(..., min_length=12)
+    role: str = Field(default="member", pattern="^(admin|technician|member|viewer)$")
+    is_active: bool = Field(default=True)
+
+
+@router.post("/{workshop_id}/users", status_code=status.HTTP_201_CREATED)
+def create_workshop_user(
+    workshop_id: str,
+    user_data: WorkshopUserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a user and assign them to this workshop (workshop admin/owner only)."""
+    try:
+        workshop_uuid = uuid.UUID(workshop_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid workshop ID",
+        )
+    
+    # Ensure user is admin or owner of the workshop
+    _ensure_workshop_member(db, current_user.id, workshop_uuid, min_role="admin")
+    
+    # Check if user already exists
+    existing = db.query(User).filter(
+        (User.username == user_data.username) | (User.email == user_data.email)
+    ).first()
+    
+    if existing:
+        if existing.username == user_data.username:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already exists",
+            )
+        if existing.email == user_data.email:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already exists",
+            )
+    
+    # Hash password
+    try:
+        password_hash = get_password_hash(user_data.password)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    
+    # Create user (global role defaults to technician, but workshop role is set separately)
+    user = User(
+        id=uuid.uuid4(),
+        username=user_data.username,
+        email=user_data.email,
+        password_hash=password_hash,
+        role="technician",  # Default global role
+        is_active=user_data.is_active,
+        email_verified=True,  # Workshop admins create verified users
+        registration_approved=True,  # Auto-approved
+        created_by=str(current_user.id),
+    )
+    
+    db.add(user)
+    db.flush()
+    
+    # Add user to workshop with specified role
+    membership = WorkshopMemberCRUD.add_member(
+        db,
+        workshop_id=workshop_uuid,
+        user_id=user.id,
+        role=user_data.role,
+        invited_by=current_user.id,
+        created_by=current_user.id,
+    )
+    
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "is_active": user.is_active,
+        "workshop_role": membership.role,
+        "workshop_id": str(workshop_uuid),
+    }
 

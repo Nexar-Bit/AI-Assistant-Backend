@@ -472,22 +472,23 @@ async def send_message(
     # Estimate tokens needed (rough estimate: 4 chars per token)
     estimated_tokens = len(content) // 4 + 800  # Content + max response
     
-    # Check token limits before AI call
+    # Check token limits before AI call (shared workshop pool)
     if not accounting_service.check_workshop_limits(thread.workshop_id, estimated_tokens):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
-                "error": "Workshop monthly token limit exceeded",
+                "error": "Workshop monthly token limit exceeded (shared pool)",
                 "remaining": accounting_service.get_user_remaining_tokens(current_user.id, thread.workshop_id),
             },
         )
     
+    # Check user role-based access (viewers blocked, owners/admins unlimited)
     if not accounting_service.check_user_limits(current_user.id, thread.workshop_id, estimated_tokens):
         remaining = accounting_service.get_user_remaining_tokens(current_user.id, thread.workshop_id)
         raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "error": "User daily token limit exceeded",
+                "error": "Access denied. Viewers cannot use AI features.",
                 "remaining": remaining,
             },
         )

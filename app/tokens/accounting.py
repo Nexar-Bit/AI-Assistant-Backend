@@ -47,7 +47,11 @@ class TokenAccountingService:
         workshop_id: uuid.UUID,
         tokens_needed: int,
     ) -> bool:
-        """Check if user has enough tokens remaining (daily + role-based)."""
+        """Check if user can use tokens (shared workshop pool - no individual limits).
+        
+        Only checks workshop-level limits. All users in a workshop share the same token pool.
+        Owners and admins still have unlimited access, viewers have no access.
+        """
         # Get user's role in workshop
         membership = (
             self.db.query(WorkshopMember)
@@ -70,17 +74,9 @@ class TokenAccountingService:
         if membership.role == "viewer":
             return False
         
-        # Get or create user token usage record
-        usage = self._get_or_create_user_usage(user_id, workshop_id)
-        
-        # Check daily limit
-        if usage.daily_limit and usage.total_tokens_today + tokens_needed > usage.daily_limit:
-            return False
-        
-        # Check monthly limit
-        if usage.monthly_limit and usage.total_tokens_month + tokens_needed > usage.monthly_limit:
-            return False
-        
+        # For all other roles (technician, member), tokens are shared at workshop level
+        # The workshop limit check is done separately in check_workshop_limits
+        # This method now just validates role-based access
         return True
 
     def reserve_tokens(
@@ -92,11 +88,14 @@ class TokenAccountingService:
         """
         Reserve tokens before AI call (optimistic locking).
         Returns True if reservation successful, False otherwise.
+        
+        Only checks workshop-level limits since tokens are shared.
         """
-        # Check limits first
+        # Check workshop limits (shared pool)
         if not self.check_workshop_limits(workshop_id, tokens):
             return False
         
+        # Check user role-based access (viewers blocked, owners/admins unlimited)
         if not self.check_user_limits(user_id, workshop_id, tokens):
             return False
         
@@ -111,10 +110,14 @@ class TokenAccountingService:
         output_tokens: int,
         model: str = "gpt-4o-mini",
     ) -> None:
-        """Record actual token usage after AI call."""
+        """Record actual token usage after AI call.
+        
+        Tokens are shared at workshop level - all users consume from the same pool.
+        User-level tracking is kept for reporting purposes only.
+        """
         total_tokens = input_tokens + output_tokens
         
-        # Update workshop usage
+        # Update workshop usage (shared pool)
         workshop = (
             self.db.query(Workshop)
             .filter(Workshop.id == workshop_id)
@@ -128,7 +131,7 @@ class TokenAccountingService:
             workshop.tokens_used_this_month += total_tokens
             self.db.add(workshop)
         
-        # Update user usage
+        # Update user usage (for reporting/analytics only, not for limits)
         usage = self._get_or_create_user_usage(user_id, workshop_id)
         
         # Check if date changed (daily reset)
@@ -140,12 +143,12 @@ class TokenAccountingService:
             usage.output_tokens_today = 0
             usage.total_tokens_today = 0
         
-        # Update daily counters
+        # Update daily counters (for reporting)
         usage.input_tokens_today += input_tokens
         usage.output_tokens_today += output_tokens
         usage.total_tokens_today += total_tokens
         
-        # Update monthly counters
+        # Update monthly counters (for reporting)
         usage.input_tokens_month += input_tokens
         usage.output_tokens_month += output_tokens
         usage.total_tokens_month += total_tokens
@@ -156,7 +159,7 @@ class TokenAccountingService:
         self.db.commit()
         
         logger.info(
-            "Token usage recorded: user=%s, workshop=%s, input=%d, output=%d, total=%d",
+            "Token usage recorded (shared pool): user=%s, workshop=%s, input=%d, output=%d, total=%d",
             user_id,
             workshop_id,
             input_tokens,
@@ -169,7 +172,11 @@ class TokenAccountingService:
         user_id: uuid.UUID,
         workshop_id: uuid.UUID,
     ) -> Dict[str, any]:
-        """Get remaining tokens for user (daily and monthly)."""
+        """Get remaining tokens (shared workshop pool).
+        
+        Returns workshop-level shared token pool information.
+        User-level tracking is for reporting only.
+        """
         usage = self._get_or_create_user_usage(user_id, workshop_id)
         
         workshop = (
@@ -190,21 +197,21 @@ class TokenAccountingService:
         
         is_unlimited = membership and membership.role in ["owner", "admin"]
         
+        # Tokens are shared at workshop level
+        workshop_remaining = (workshop.monthly_token_limit - workshop.tokens_used_this_month) if workshop else 0
+        
         return {
             "user": {
-                "daily_limit": None if is_unlimited else usage.daily_limit,
-                "daily_used": usage.total_tokens_today,
-                "daily_remaining": None if is_unlimited else (usage.daily_limit - usage.total_tokens_today) if usage.daily_limit else None,
-                "monthly_limit": None if is_unlimited else usage.monthly_limit,
-                "monthly_used": usage.total_tokens_month,
-                "monthly_remaining": None if is_unlimited else (usage.monthly_limit - usage.total_tokens_month) if usage.monthly_limit else None,
+                "daily_used": usage.total_tokens_today,  # For reporting only
+                "monthly_used": usage.total_tokens_month,  # For reporting only
                 "is_unlimited": is_unlimited,
             },
             "workshop": {
                 "monthly_limit": workshop.monthly_token_limit if workshop else 0,
                 "monthly_used": workshop.tokens_used_this_month if workshop else 0,
-                "monthly_remaining": (workshop.monthly_token_limit - workshop.tokens_used_this_month) if workshop else 0,
+                "monthly_remaining": max(0, workshop_remaining),  # Shared pool
                 "reset_date": workshop.token_reset_date.isoformat() if workshop and workshop.token_reset_date else None,
+                "is_shared_pool": True,  # Indicates tokens are shared
             },
         }
 
@@ -249,97 +256,24 @@ class TokenAccountingService:
         user_id: uuid.UUID,
         workshop_id: uuid.UUID,
     ) -> Optional[int]:
-        """Calculate user's daily limit from workshop pool."""
-        membership = (
-            self.db.query(WorkshopMember)
-            .filter(
-                WorkshopMember.user_id == user_id,
-                WorkshopMember.workshop_id == workshop_id,
-            )
-            .first()
-        )
+        """Calculate user's daily limit (not used for limits, kept for reporting).
         
-        if not membership or membership.role in ["owner", "admin"]:
-            return None  # Unlimited
-        
-        if membership.role == "viewer":
-            return 0  # No AI access
-        
-        workshop = (
-            self.db.query(Workshop)
-            .filter(Workshop.id == workshop_id)
-            .first()
-        )
-        
-        if not workshop:
-            return None
-        
-        # Distribute workshop daily limit among technicians
-        daily_workshop_limit = workshop.monthly_token_limit // 30
-        
-        # Count active technicians in workshop
-        technician_count = (
-            self.db.query(WorkshopMember)
-            .filter(
-                WorkshopMember.workshop_id == workshop_id,
-                WorkshopMember.role == "technician",
-                WorkshopMember.is_active.is_(True),
-            )
-            .count()
-        )
-        
-        if technician_count == 0:
-            return daily_workshop_limit
-        
-        # Fair distribution
-        return max(1, daily_workshop_limit // technician_count)
+        Tokens are shared at workshop level, so individual limits are not enforced.
+        """
+        # Return None to indicate no individual limit (shared pool)
+        return None
 
     def _calculate_monthly_limit(
         self,
         user_id: uuid.UUID,
         workshop_id: uuid.UUID,
     ) -> Optional[int]:
-        """Calculate user's monthly limit from workshop pool."""
-        membership = (
-            self.db.query(WorkshopMember)
-            .filter(
-                WorkshopMember.user_id == user_id,
-                WorkshopMember.workshop_id == workshop_id,
-            )
-            .first()
-        )
+        """Calculate user's monthly limit (not used for limits, kept for reporting).
         
-        if not membership or membership.role in ["owner", "admin"]:
-            return None  # Unlimited
-        
-        if membership.role == "viewer":
-            return 0  # No AI access
-        
-        workshop = (
-            self.db.query(Workshop)
-            .filter(Workshop.id == workshop_id)
-            .first()
-        )
-        
-        if not workshop:
-            return None
-        
-        # Distribute workshop monthly limit among technicians
-        technician_count = (
-            self.db.query(WorkshopMember)
-            .filter(
-                WorkshopMember.workshop_id == workshop_id,
-                WorkshopMember.role == "technician",
-                WorkshopMember.is_active.is_(True),
-            )
-            .count()
-        )
-        
-        if technician_count == 0:
-            return workshop.monthly_token_limit
-        
-        # Fair distribution
-        return max(1, workshop.monthly_token_limit // technician_count)
+        Tokens are shared at workshop level, so individual limits are not enforced.
+        """
+        # Return None to indicate no individual limit (shared pool)
+        return None
 
     def _check_and_reset_monthly(self, workshop: Workshop) -> None:
         """Check if monthly reset is needed and reset if so."""

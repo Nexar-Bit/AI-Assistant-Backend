@@ -223,18 +223,19 @@ async def chat_websocket(
                 token_accounting = TokenAccountingService(db)
                 estimated_tokens = sum(len(msg.get("content", "")) // 4 for msg in formatted_messages) + 200  # Buffer for response
                 
-                # Check limits
+                # Check limits (shared workshop pool)
                 if not token_accounting.check_workshop_limits(thread.workshop_id, estimated_tokens):
                     await websocket.send_json({
                         "type": "error",
-                        "message": "Workshop token limit exceeded. Please contact your administrator.",
+                        "message": "Workshop token limit exceeded (shared pool). Please contact your administrator.",
                     })
                     continue
                 
+                # Check user role-based access (viewers blocked, owners/admins unlimited)
                 if not token_accounting.check_user_limits(user.id, thread.workshop_id, estimated_tokens):
                     await websocket.send_json({
                         "type": "error",
-                        "message": "Your daily token limit has been reached. Please try again tomorrow.",
+                        "message": "Access denied. Viewers cannot use AI features.",
                     })
                     continue
                 
