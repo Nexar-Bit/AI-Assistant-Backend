@@ -67,11 +67,16 @@ def require_roles(allowed_roles: List[str]) -> Callable[[User], User]:
 
 
 def require_superuser(current_user: Annotated[User, Depends(get_current_user)]) -> User:
-    """Dependency to require superuser (admin) role."""
-    if current_user.role != "admin":
+    """Dependency to require platform-level superuser role.
+
+    For compatibility, allow both global 'owner' and legacy 'admin' users.
+    Frontend already restricts /admin UI to 'owner'; this just prevents 403s
+    while old 'admin' records still exist in the database.
+    """
+    if current_user.role not in ("owner", "admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only superusers can perform this action",
+            detail="Only platform superusers can perform this action",
         )
     return current_user
 

@@ -20,15 +20,15 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
     password: str = Field(..., min_length=12)
-    role: str = Field(default="technician", pattern="^(admin|technician|viewer)$")
+    # Global role: owner (super admin), admin, technician, viewer, member
+    role: str = Field(default="technician", pattern="^(owner|admin|technician|viewer|member)$")
     is_active: bool = Field(default=True)
-    email_verified: bool = Field(default=True)  # Admin-created users are pre-verified
 
 
 class UserUpdate(BaseModel):
     username: Optional[str] = Field(None, min_length=3, max_length=50)
     email: Optional[EmailStr] = None
-    role: Optional[str] = Field(None, pattern="^(admin|technician|viewer)$")
+    role: Optional[str] = Field(None, pattern="^(owner|admin|technician|viewer|member)$")
     is_active: Optional[bool] = None
     daily_token_limit: Optional[int] = Field(None, ge=0)
 
