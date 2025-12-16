@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.dependencies import get_current_user, require_superuser
 from app.models.user import User
-from app.workshops.models import Workshop
+from app.workshops.models import Workshop, WorkshopMember
 
 router = APIRouter(prefix="/admin/workshops", tags=["admin-workshops"])
 
@@ -321,4 +321,27 @@ def set_token_limit(
     db.commit()
     db.refresh(workshop)
     return workshop
+
+
+@router.get("/memberships/all")
+def get_all_workshop_memberships(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superuser),
+):
+    """Get all workshop memberships (platform admin only). Returns a mapping of workshop_id -> list of user_ids."""
+    memberships = db.query(WorkshopMember).filter(
+        WorkshopMember.is_deleted == False,
+        WorkshopMember.is_active == True,
+    ).all()
+    
+    # Create a mapping: workshop_id -> list of user_ids
+    workshop_users_map = {}
+    for membership in memberships:
+        workshop_id = str(membership.workshop_id)
+        user_id = str(membership.user_id)
+        if workshop_id not in workshop_users_map:
+            workshop_users_map[workshop_id] = []
+        workshop_users_map[workshop_id].append(user_id)
+    
+    return {"workshop_users": workshop_users_map}
 
